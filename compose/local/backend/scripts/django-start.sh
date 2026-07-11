@@ -4,7 +4,7 @@ set -o errexit
 set -o pipefail
 set -o nounset
 
-set -e
+ENABLE_DEBUGPY=${ENABLE_DEBUGPY:-0}
 
 echo "Running Django now..."
 

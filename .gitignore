@@ -163,7 +163,7 @@ __marimo__/
 Thumbs.db
 
 # IDE settings
-.vscode/
+# .vscode/
 tempCodeRunnerFile.py
 
 # Logs of any kind should be ignored

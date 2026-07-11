@@ -11,7 +11,7 @@
     "python.languageServer": "Pylance",
     "python-envs.defaultEnvManager": "ms-python.python:system",
     "python-envs.defaultPackageManager": "ms-python.python:pip",
-    "python.defaultInterpreterPath": "/Users/gurjotsingh/Library/Caches/pypoetry/virtualenvs/unified-financial-operations-FTo2T7vf-py3.12/bin/activate", // Above two should handle, if need be set this also
+    "python.defaultInterpreterPath": "/Users/gurjotsingh/Library/Caches/pypoetry/virtualenvs/unified-financial-operations-FTo2T7vf-py3.12/bin/python", // Above two should handle, if need be set this also
     "python.terminal.activateEnvironment": false, // true: makes the shell opening slow
     // These are set in pyproject.toml, but still keeping them here if that breaks somehow
     "python.analysis.typeCheckingMode": "off",

@@ -4,6 +4,8 @@ set -o errexit
 set -o pipefail
 set -o nounset
 
+ENABLE_DEBUGPY=${ENABLE_DEBUGPY:-0}
+
 echo "Running Worker now..."
 
 if [ "$ENABLE_DEBUGPY" = "1" ]; then

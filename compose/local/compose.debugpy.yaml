@@ -1,0 +1,17 @@
+services:
+
+  django:
+    stdin_open: true
+    tty: true
+    environment:
+      - ENABLE_DEBUGPY=1
+    ports:
+      - 2253:5678
+
+  bma_celeryworker:
+    stdin_open: false
+    tty: false
+    environment:
+      - ENABLE_DEBUGPY=1
+    ports:
+      - 2254:5678
