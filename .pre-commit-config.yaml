@@ -38,14 +38,16 @@ repos:
     rev: 7.2.0
     hooks:
       - id: flake8
-        additional_dependencies: [flake8-isort, flake8-print]
+        # additional_dependencies: [flake8-isort, flake8-print]
+        additional_dependencies: [flake8-print]
         args: ["--ignore=E501,W503,F403,F405"]
 
   # Dont think we need this, we already have isort through flake8
-  # - repo: https://github.com/PyCQA/isort
-  #   rev: 5.13.2
-  #   hooks:
-  #     - id: isort
+  # Isort from flake8 only flags and not fix import(s), figure out why it does so
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
 
   # Validate Code complexity
   - repo: https://github.com/yunojuno/pre-commit-xenon

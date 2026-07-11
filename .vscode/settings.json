@@ -1,5 +1,4 @@
 {
-    "python.languageServer": "Pylance",
     "files.exclude": {
         "**/.git": true,
         "**/.svn": true,
@@ -9,25 +8,14 @@
         "**/__pycache__": true,
         "**/.pytest_cache": true
     },
+    "python.languageServer": "Pylance",
     "python-envs.defaultEnvManager": "ms-python.python:system",
     "python-envs.defaultPackageManager": "ms-python.python:pip",
-    "python.defaultInterpreterPath": "", // Above two should handle, if need be set this also
+    "python.defaultInterpreterPath": "/Users/gurjotsingh/Library/Caches/pypoetry/virtualenvs/unified-financial-operations-FTo2T7vf-py3.12/bin/activate", // Above two should handle, if need be set this also
     "python.terminal.activateEnvironment": false, // true: makes the shell opening slow
     // These are set in pyproject.toml, but still keeping them here if that breaks somehow
     "python.analysis.typeCheckingMode": "off",
     "python.analysis.extraPaths": [
         "backend",
-    ],
-    // Frontend (Vue settings)
-    "explorer.fileNesting.enabled": true,
-    "explorer.fileNesting.patterns": {
-        "tsconfig.json": "tsconfig.*.json, env.d.ts, typed-router.d.ts",
-        "vite.config.*": "jsconfig*, vitest.config.*, cypress.config.*, playwright.config.*",
-        "package.json": "package-lock.json, pnpm*, .yarnrc*, yarn*, .eslint*, eslint*, .oxlint*, oxlint*, .oxfmt*, .prettier*, prettier*, .editorconfig"
-    },
-    "editor.codeActionsOnSave": {
-        "source.fixAll": "explicit"
-    },
-    "editor.formatOnSave": true,
-    "editor.defaultFormatter": "esbenp.prettier-vscode"
+    ]
 }
