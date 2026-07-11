@@ -1,0 +1,21 @@
+{
+    "python.languageServer": "Pylance",
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/.DS_Store": true,
+        "**/Thumbs.db": true,
+        "**/__pycache__": true,
+        "**/.pytest_cache": true
+    },
+    "python-envs.defaultEnvManager": "ms-python.python:poetry",
+    "python-envs.defaultPackageManager": "ms-python.python:poetry",
+    "python.defaultInterpreterPath": "", // Above two should handle, if need be set this also
+    "python.terminal.activateEnvironment": false, // true: makes the shell opening slow
+    // These are set in pyproject.toml, but still keeping them here if that breaks somehow
+    "python.analysis.typeCheckingMode": "off",
+    "python.analysis.extraPaths": [
+        "backend",
+    ]
+}
