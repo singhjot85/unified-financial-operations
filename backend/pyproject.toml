@@ -1,0 +1,25 @@
+[project]
+name = "c"
+version = "0.1.0"
+description = "White label, multi-tenant financial operations platform that adapts to the unique needs of different organizations."
+authors = [
+    {name = "Gurjot Singh",email = "gurjotsingh855855@gmail.com"}
+]
+requires-python = ">=3.12"
+dependencies = [
+    "django (==5.2.16)",
+    "djangorestframework (>=3.17.1,<4.0.0)",
+    "django-tenants (>=3.10.2,<4.0.0)"
+]
+
+[dependency-groups]
+dev = [
+    "pyyaml (>=6.0.3,<7.0.0)",
+    "pre-commit (>=4.6.0,<5.0.0)",
+    "jsonschema (>=4.26.0,<5.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

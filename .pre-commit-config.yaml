@@ -59,7 +59,9 @@ repos:
     rev: v1.36.4
     hooks:
       - id: djlint-reformat-django
+        exclude: '^frontend/index\.html$'
       - id: djlint-django
+        exclude: '^frontend/index\.html$'
 
   # Check for any secrete leak(s) inside repo
   - repo: https://github.com/Yelp/detect-secrets
