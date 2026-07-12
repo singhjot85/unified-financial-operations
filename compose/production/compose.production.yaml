@@ -1,0 +1,115 @@
+volumes:
+  pg_data:
+    name: unfo_local_pg_data
+
+secrets:
+  global-env:
+    file: ../../.env
+
+services:
+
+  django: &Django
+    build:
+      context: ../..
+      dockerfile: compose/local/backend/Dockerfile
+      secrets:
+        - global-env
+    container_name: unfo_django
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+      - ./database/.env
+    depends_on:
+      # postgres:
+      #   condition: service_healthy
+      unfo_cache:
+        condition: service_started
+    volumes:
+      - ../../backend:/backend
+      - ../../compose/local/backend/scripts:/scripts
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      - DJANGO_DEBUG=True
+      - WATCHFILES_FORCE_POLLING=true
+      - PYTHONPATH=/backend
+      - ENABLE_DEBUGPY=0
+    ports:
+      - "8000:8000"
+
+  postgres:
+    build:
+      context: ../../
+      dockerfile: compose/local/database/Dockerfile
+      secrets:
+        - global-env
+    container_name: unfo_postgres
+    env_file:
+      - ./database/.env
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 30s
+      retries: 5
+
+  frontend:
+    build:
+      context: ../../
+      dockerfile: compose/local/frontend/Dockerfile
+    container_name: unfo_frontend
+    restart: unless-stopped
+    volumes:
+      - ../../frontend:/frontend
+      # - ../../frontend/node_modules:/frontend/node_modules
+      - ../../compose/local/frontend/scripts:/scripts
+    ports:
+      - "5173:5173"
+    env_file:
+      - ./frontend/.env
+
+  unfo_cache:
+    image: valkey/valkey:8.1.5-alpine
+    pull_policy: if_not_present
+    container_name: unfo_valkey_cache
+    ports:
+      - "6379:6379"
+
+  unfo_broker:
+    image: valkey/valkey:8.1.5-alpine
+    pull_policy: if_not_present
+    container_name: unfo_valkey_broker
+    command: valkey-server --port 6378 --appendonly yes
+    ports:
+      - "6378:6378"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-p", "6378", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  unfo_celeryworker:
+    <<: *Django
+    command: /scripts/worker-start.sh
+    container_name: unfo_celeryworker
+    ports:
+      - "5555:5555"
+    depends_on:
+      django:
+        condition: service_started
+      unfo_broker:
+        condition: service_healthy
+
+  # unfo_celerybeat:
+  #   <<: *Django
+  #   command: scripts/beat-start.sh
+  #   container_name: unfo_celerybeat
+  #   depends_on:
+  #     django:
+  #       condition: service_started
+  #     unfo_broker:
+  #       condition: service_healthy

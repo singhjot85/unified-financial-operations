@@ -31,17 +31,17 @@ Currently, we are launching the platform to serve our immediate client—an NGO 
 
 ```
 project-root/
-	|- .agents/ 			# Common agentic configs, skills, plugins
-	|- .vscode/				# IDE settings for vscode
-	|- .github/				# Github related settings
-	|- documentation/		# Project wide documentation, architecture and assets
-	|- backend/				# Complete Backend Application
-	|- frontend/			# Complete Frontend Application
-	|- compose/				# Dockerfile(s) and docker-compose configurations
-	- .gitignore
-	- .dockerignore
-	- .env.example
-	- .pre-commit-config.yaml
+|	|- .agents/ 			# Common agentic configs, skills, plugins
+|	|- .vscode/				# IDE settings for vscode
+|	|- .github/				# Github related settings
+|	|- documentation/		# Project wide documentation, architecture and assets
+|	|- backend/				# Complete Backend Application
+|	|- frontend/			# Complete Frontend Application
+|	|- compose/				# Dockerfile(s) and docker-compose configurations
+|	|- .gitignore
+|	|- .dockerignore
+|	|- .env.example
+|	|- .pre-commit-config.yaml
 ```
 
 - **`backend/`**: Contains the complete Django project, including apps, configuration, and management scripts.
@@ -66,16 +66,58 @@ The project believes in clearly documenting what is being built or added, genera
 The Documentation should clealy answer: _What_, _Why_ and _How_.<br/>
 Each Documentation directory has a dedicated `Readme.md` file that has general overview and also contains index to the rest of the documentation files.<br/>
 
+### Principle
+
+- **HLD (High-Level Design)** — lives centrally in `documentation/`. Product POV, architecture, cross-cutting decisions.
+- **LLD (Low-Level Design)** — lives colocated with each app as `README.md` at the app root. Models, implementation details, gotchas.
+
+Every doc should answer **What**, **Why**, and **How**.
+
 ```
-documentation/
-	|- business-requirement-documents/
-	|- technical-architecture/
-	|- logos/
+project-root/
+|	|- documentation/
+|   |- Readme.md
+|   |- technical-architecture/
+|   |   |- Readme.md                        # HLD index, links to ADRs + app registry
+|   |   |- architecture-decision-records/   # Record for common architectural decisions
+|   |       |- 0001-swappable-fk-pattern.md
+|	|		|- ...
+|   |- logos/
+|	|- business-requirement-documents/      # Common agentic configs, skills, plugins
+|- backend/
+|   |- README.md                            # index of all apps, links to each
+|   |- apps/
+|       |- crm/README.md                    # LLD: models, swappable settings, checks.py
+|       |- notification_app/README.md
+|       |- ledger/README.md
+|- frontend/
+|   |- README.md
+|- compose/
+|- .vscode/
+|- .github/
+|- .agents/
 ```
 
 - [**business-requirement-documents:**](./documentation/business-requirement-documents/Readme.md) Houses all the business related documentation, this gives a product side pov and overview of a feature and its implementation.
 - [**technical-architecture:**](./documentation/technical-architecture/Readme.md) Houses all the technical high level design and architecture for a feature or functionality.
+- [**Backend LLD Index:**](./backend/Readme.md) Backend general practices, project conventions and Backend LLD Index.
+- [**Frontend LLD Index:**](./backend/Readme.md) Frontend general practices and project conventions.
 - [**logos:**](./documentation/logos/) Logos used across the repository.
+
+### Rules
+
+1. **Cross-linking is mandatory, not optional.**
+
+- Every app `README.md` must link up to the HLD doc(s)/ADR(s) it implements.
+- Every HLD doc must link down to the app README(s) that implement it.
+- Without this link, the two layers drift silently.
+
+2. **App registry:** `backend/README.md` (or `technical-architecture/Readme.md`) maintains a table of every app with a one-line purpose and a link to its README — a single place to discover what exists.
+
+3. **ADRs for cross-cutting patterns:** Anything that spans multiple apps (e.g. the swappable-FK pattern, `missing_attrs`/`checks.py` contract convention, "no MTI — concrete inheritance + proxy models only") belongs in `technical-architecture/adr/`, not buried in whichever app's README happened to describe it first. App READMEs reference the ADR instead of re-explaining it.
+
+4. **PR checklist enforcement:** Any PR touching an app's models, contracts, or swappable settings must update that app's `README.md` in the same PR. Colocation only prevents staleness if it's enforced at review time.
+
 
 ## Local Development Setup
 

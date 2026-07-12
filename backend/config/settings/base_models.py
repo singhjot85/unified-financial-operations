@@ -43,9 +43,9 @@ DEFAULT_DJANGO_APPS = [
 
 SHARED_EXTRA_DEPENDENCIES = [
     "rest_framework",
-    "django_tenants",
-    "rest_framework.authtoken",
-    "dj_rest_auth",
+    # "django_tenants",
+    # "rest_framework.authtoken",
+    # "dj_rest_auth",
     "constance",
 ]
 
@@ -54,11 +54,11 @@ PUBLIC_ONLY_EXTRA_DEPENDENCIES = [
 ]
 
 PROJECT_APPS = [
-    "apps.tenants",
-    "apps.setup",
-    "apps.customer_management",
-    "apps.payments_management",
-    "apps.notifications",
+    # "apps.tenants",
+    # "apps.setup",
+    # "apps.customer_management",
+    # "apps.payments_management",
+    # "apps.notifications",
 ]
 
 
@@ -69,15 +69,15 @@ DJANGO_TENANT_PUBLIC_APPS = [
     *DEFAULT_DJANGO_APPS,
     *SHARED_EXTRA_DEPENDENCIES,
     *PUBLIC_ONLY_EXTRA_DEPENDENCIES,
-    "apps.tenants",
-    "apps.setup",
+    # "apps.tenants",
+    # "apps.setup",
 ]
 
 DJANGO_TENANT_PRIVATE_APPS = [
     *DEFAULT_DJANGO_APPS,
     *SHARED_EXTRA_DEPENDENCIES,
-    "apps.customer_management",
-    "apps.payments_management",
-    "apps.setup",
-    "apps.notifications",
+    # "apps.customer_management",
+    # "apps.payments_management",
+    # "apps.setup",
+    # "apps.notifications",
 ]
