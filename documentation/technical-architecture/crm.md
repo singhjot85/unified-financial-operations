@@ -26,7 +26,7 @@
 
 ### Components involved
 - **`apps.crm`** — owns `Customer`, `CustomerEmail`, `CustomerPhone`, `CustomerEntity`, `CustomerPreferenceType`, `CustomerPreference` (implemented); `CustomerAddress`, `Lead`, `Pipeline`, `Stage`, `Deal`, `DealStageHistory` (planned, not yet built). Exposes `crm.Customer` as the concrete model other apps reference.
-- **`apps.notification_app`, `apps.ledger`, `apps.donation_management`, `apps.expense_management`** — each will define its own swappable `LazyImport` setting in its `app_settings.py` pointing at `CRM_CUSTOMER` from `config.settings.base_models`, resolved at runtime, never importing `crm.models.Customer` directly. (These apps are not yet built.)
+- **`apps.notification_app`, `apps.ledger`, `apps.donation_management`, `apps.expense_management`** — each will define its own swappable `DefferedImport` setting in its `app_settings.py` pointing at `CRM_CUSTOMER` from `config.settings.base_models`, resolved at runtime, never importing `crm.models.Customer` directly. (These apps are not yet built.)
 - **`core.contracts`** — supplies the existing `missing_attrs()` primitive used by every consuming app's `checks.py` to validate that whatever model is swapped in for `CRM_CUSTOMER` satisfies that app's `REQUIRED_CRM_CUSTOMER_ATTRS`.
 - **Existing DAG Seeder** — will seed a default `Pipeline` + `Stage` set per tenant client-type at tenant provisioning time (not yet implemented).
 
@@ -36,7 +36,7 @@
 2. A `Lead` is qualified and converted → creates/links a `Customer`, creates a `Deal` in the tenant's default `Pipeline` at its first `Stage`. _(Not yet built.)_
 3. `Deal` moves through `Stage`s (ordered, per `Pipeline`); each stage transition is logged (`DealStageHistory`) for audit. _(Not yet built.)_
 4. On `Deal.status = won`, the `Customer` is now available for consuming apps — `apps.invoicing`/`apps.donation_management` pick it up via their own flows.
-5. Every consuming app resolves `Customer` at runtime via its own `LazyImport` setting in `app_settings.py`, pointing at `CRM_CUSTOMER` in `config.settings.base_models`.
+5. Every consuming app resolves `Customer` at runtime via its own `DefferedImport` setting in `app_settings.py`, pointing at `CRM_CUSTOMER` in `config.settings.base_models`.
 
 ```
 Lead ──(convert)──> Customer ──┬──> Deal ──(stage transitions)──> Won/Lost
@@ -65,7 +65,7 @@ Lead ──(convert)──> Customer ──┬──> Deal ──(stage transiti
 - **`Deal`**: FK to `Customer`, FK to `Pipeline`, FK to `Stage`, `amount`, `expected_close_date`, `status` (`open`/`won`/`lost`), `lost_reason`, `owner`.
 - **`DealStageHistory`**: FK to `Deal`, `from_stage`, `to_stage`, `changed_by`, `changed_at`.
 
-**Contract exposed to consumers:** `CRM_CUSTOMER` plain string (`"crm.Customer"`) in `config.settings.base_models`. Consuming apps declare a `LazyImport` in their own `app_settings.py` pointing at that string, and validate the resolved model via `REQUIRED_CRM_CUSTOMER_ATTRS` in their `checks.py`.
+**Contract exposed to consumers:** `CRM_CUSTOMER` plain string (`"crm.Customer"`) in `config.settings.base_models`. Consuming apps declare a `DefferedImport` in their own `app_settings.py` pointing at that string, and validate the resolved model via `REQUIRED_CRM_CUSTOMER_ATTRS` in their `checks.py`.
 
 ### Integration points
 - **Feature flags:** CRM's Lead/Pipeline/Deal UI is gated behind a `crm_pipeline` module flag (Layer 2, tenant config) — Customer identity itself is **not** gated (every tenant needs identity; only the sales-pipeline UI is optional, e.g. a pure donation-portal tenant may not need Leads/Deals surfaced).
@@ -100,5 +100,5 @@ frontend/src/modules/crm/        # Customers, Leads, Pipeline board, Deals UI  [
   - **Performance:** `Deal` list/board views should be indexed on `(pipeline_id, stage_id)` for kanban-style queries; `Customer` indexed on `sub_type` and `email`.
   - **Security:** Lead/Deal ownership (`owner` FK) should be respected in permission classes — a rep should not see another rep's Leads unless granted via Layer 3 (Groups/Permissions), per the platform's existing 3-layer feature-flag/permission model.
 - **Changelog:**
-  - 2026-07-15 — Updated to reflect implementation status: Customer identity layer implemented; Lead/Pipeline/Stage/Deal planned but not yet built. Corrected model field names to match actual code (party_type/customer_type vs sub_type; no display_name field). Corrected consuming apps to use LazyImport not LazyModelImport.
+  - 2026-07-15 — Updated to reflect implementation status: Customer identity layer implemented; Lead/Pipeline/Stage/Deal planned but not yet built. Corrected model field names to match actual code (party_type/customer_type vs sub_type; no display_name field). Corrected consuming apps to use DefferedImport not DefferedModel.
   - 2026-07-12 — Initial draft.

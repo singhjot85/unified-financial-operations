@@ -11,7 +11,7 @@
 backend/
 ├── apps/
 │   ├── core/                  # Shared base models, mixins, contracts, app_settings framework
-│   │   ├── app_settings/      # BaseSetting descriptor, LazyImport, Constance, registry
+│   │   ├── app_settings/      # BaseSetting descriptor, DefferedImport, Constance, registry
 │   │   ├── models.py          # BaseModel, BaseLogModel, AbstractParty, DeletionTrackingModel, SimpleVersionModelMixin
 │   │   ├── constants.py
 │   │   └── serializers.py
@@ -60,7 +60,7 @@ Each app that needs configurable defaults or swappable references declares a `Ba
 in its `app_settings.py`. See `documentation/technical-architecture/app-settings-framework.md` for the
 full design. Key descriptor types available:
 
-- `LazyImport` — resolves a dotted-path string to a Python class/object at first access.
+- `DefferedImport` — resolves a dotted-path string to a Python class/object at first access.
 - `Constance` — live admin-editable setting backed by `django-constance` (project-wide, not per-tenant).
 
 Override any setting per-project via `settings.<APP>_APP_SETTINGS = { "SETTING_NAME": ... }`.
@@ -68,7 +68,7 @@ Override any setting per-project via `settings.<APP>_APP_SETTINGS = { "SETTING_N
 ### Cross-App Foreign Keys — Swappable Reference Pattern
 
 Apps **must not** import another app's model directly (e.g. `from apps.crm.models import Customer`).
-Instead, declare a `LazyImport` in the consuming app's `app_settings.py` pointing at the central string
+Instead, declare a `DefferedImport` in the consuming app's `app_settings.py` pointing at the central string
 from `config.settings.base_models`. See `documentation/technical-architecture/Readme.md` for the
 full pattern and migration (`swappable_dependency`) guidance.
 

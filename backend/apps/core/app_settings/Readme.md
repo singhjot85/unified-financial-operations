@@ -15,8 +15,8 @@
 
 It owns four setting types (naming still tentative — **TODO: better names**):
 
-- `LazyImport`
-- `LazyModelImport`
+- `DefferedImport`
+- `DefferedModel`
 - `Flag`
 - `Constance`
 
@@ -77,7 +77,10 @@ class Holder:
 
 **What it is:** Normally, `class Foo: ...` is built by Python's builtin `type`. A metaclass is a class used to build _other classes_ — supplying `metaclass=SomeMetaclass` means `SomeMetaclass` controls what happens the moment `class Foo(...)` is defined, once, at class-creation time (not per-instance).
 
-**Why this app needs it:** Every settings class needs two things done automatically, without the app author remembering boilerplate: (1) turn its inner `Meta.app_label` into a usable override-key string, and (2) walk its class body and collect every field that's a `SettingType` descriptor, so the framework can enumerate "all of this app's settings" later (for autoregistration, for validation). A metaclass is where "the moment this class is defined" hooks live — no other mechanism runs code at exactly that point.
+**Why this app needs it:** Every settings class needs two things done automatically, without the app author remembering boilerplate:
+
+1. turn its inner `Meta.app_label` into a usable override-key string, and
+2. walk its class body and collect every field that's a `SettingType` descriptor, so the framework can enumerate "all of this app's settings" later (for autoregistration, for validation). A metaclass is where "the moment this class is defined" hooks live — no other mechanism runs code at exactly that point.
 
 **Anti-pattern to notice here:** reaching for a metaclass for anything _other_ than "must run at class-definition time, for every subclass, without the subclass author opting in." If a `classmethod` or a plain helper function would do the job, prefer that.
 
@@ -105,17 +108,17 @@ class Holder:
 
 **Why this app follows it:** Every setting type shares identical override-lookup logic (`project_settings.<APP>_APP_SETTINGS[name]` → `default`). Only the _last_ step — turning a raw value into something usable — genuinely differs per type. Template Method lets that shared logic live in exactly one place, written once.
 
-**Minor example of the shape:** `LazyImport.resolve()` imports a module and grabs an attribute; `Flag.resolve()` just returns what it was given unchanged; `Constance` is the one type that steps outside this shape entirely (see below), because its access pattern is fundamentally different, not just a different resolution step.
+**Minor example of the shape:** `DefferedImport.resolve()` imports a module and grabs an attribute; `Flag.resolve()` just returns what it was given unchanged; `Constance` is the one type that steps outside this shape entirely (see below), because its access pattern is fundamentally different, not just a different resolution step.
 
 ### Swappable references (generalizing Django's `AUTH_USER_MODEL`)
 
 **The pattern:** Rather than one app hard-importing another app's model directly, the _target_ is a configuration value (a string, resolved at the right moment) that a project can redirect. Django itself does this for exactly one model, and puts that one string directly in `settings.py` (`AUTH_USER_MODEL`) — a single, central, project-level declaration, not one scattered per-app. This project's swappable-FK strings now follow that same shape literally: centralized in `config.settings.base_models`, rather than duplicated inside whichever app happens to consume a given target.
 
-**Why this app follows it:** Centralizing avoids the same target string being declared — and potentially drifting — in every consuming app's own `app_settings.py`. `CRM_CUSTOMER = 'crm.Customer'` is one fact about the project's configuration; it should exist once. A consuming app's own `app_settings.py` still declares a `LazyModelImport` field if it wants the _resolved class_ form for runtime use, but that field's `default` points _at_ the centrally-declared string rather than re-declaring it.
+**Why this app follows it:** Centralizing avoids the same target string being declared — and potentially drifting — in every consuming app's own `app_settings.py`. `CRM_CUSTOMER = 'crm.Customer'` is one fact about the project's configuration; it should exist once. A consuming app's own `app_settings.py` still declares a `DefferedModel` field if it wants the _resolved class_ form for runtime use, but that field's `default` points _at_ the centrally-declared string rather than re-declaring it.
 
 ### Two distinct access modes for the same target: string vs. resolved class
 
-**The pattern:** The exact same conceptual target (`"crm.Customer"`) needs to be consumed two structurally different ways depending on _when_ it's read: as a **plain string**, with zero app-registry dependency, when Django's migration machinery builds a dependency graph; and as a **resolved model class**, safe only after the app registry is fully ready, when application code wants to actually query it. This project keeps these as two separate declarations — the central plain string in `config.settings.base_models`, and a `LazyModelImport` field in the consuming app's own `app_settings.py` — rather than one clever object trying to behave as both depending on context.
+**The pattern:** The exact same conceptual target (`"crm.Customer"`) needs to be consumed two structurally different ways depending on _when_ it's read: as a **plain string**, with zero app-registry dependency, when Django's migration machinery builds a dependency graph; and as a **resolved model class**, safe only after the app registry is fully ready, when application code wants to actually query it. This project keeps these as two separate declarations — the central plain string in `config.settings.base_models`, and a `DefferedModel` field in the consuming app's own `app_settings.py` — rather than one clever object trying to behave as both depending on context.
 
 **Why this app follows it:** A single object that's "a string, but also lazily becomes a model class if you ask it the right way" makes an unsafe access pattern (triggering model resolution inside a migration file) look syntactically identical to a safe one. Two separate, narrowly-scoped declarations mean there's no ambiguous code path — reading the string form and reading the resolved form are visibly different calls, at visibly different locations, so a reviewer can tell which one a given line of code is doing just by looking at it.
 
@@ -127,15 +130,15 @@ class Holder:
 
 ## Anti-patterns
 
-**Merging the swappable-FK string and `LazyModelImport` into one object.**
+**Merging the swappable-FK string and `DefferedModel` into one object.**
 _What it looks like:_ A `str` subclass with an added `.model` property that lazily resolves via `apps.get_model()`, so the same attribute works as a string in `swappable_dependency()` _and_ as a model class elsewhere.
 _Why it's wrong:_ It makes an unsafe call (`apps.get_model()` at migration-import time) _look_ identical, at the call site, to a safe one. It also violates interface segregation for no real gain — migration graph-building and application code want fundamentally different things from this value.
-_Do instead:_ Keep the central plain string (in `config.settings.base_models`) and each consuming app's `LazyModelImport` (in its own `app_settings.py`) as two separate, narrowly-named declarations, per "Two distinct access modes" above.
+_Do instead:_ Keep the central plain string (in `config.settings.base_models`) and each consuming app's `DefferedModel` (in its own `app_settings.py`) as two separate, narrowly-named declarations, per "Two distinct access modes" above.
 
 **Redeclaring the same swappable-FK string inside a consuming app's `app_settings.py`, instead of pointing at `config.settings.base_models`.**
 _What it looks like:_ `CRM_CUSTOMER = "crm.Customer"` written directly inside `donation_management/app_settings.py`, `ledger/app_settings.py`, and so on — each app carrying its own copy of the same string.
 _Why it's wrong:_ Now the same fact about the project's configuration exists in N places. Redirecting the target for the whole project means editing N files instead of one, and it's easy for one of them to be missed or to drift.
-_Do instead:_ Declare it once, centrally, in `config.settings.base_models`; each consuming app's `LazyModelImport` field points at that single source.
+_Do instead:_ Declare it once, centrally, in `config.settings.base_models`; each consuming app's `DefferedModel` field points at that single source.
 
 **Registering `Constance` fields as a side effect of `BaseSettings.__init__`.**
 _What it looks like:_ `CRMSettings()`'s constructor directly calling registration logic, so simply instantiating the settings object performs registration.
@@ -143,7 +146,7 @@ _Why it's wrong:_ Instantiation happens whenever _something_ first imports `app_
 _Do instead:_ Trigger registration from `core`'s own `AppConfig.ready()`, the one point in the lifecycle guaranteed to run after all `models.py` imports are done, before the app starts serving anything.
 
 **A `Flag` type that caches its resolved value.**
-_What it looks like:_ Adding an internal cache to `Flag.resolve()` "for performance," the same way `LazyImport` caches its import.
+_What it looks like:_ Adding an internal cache to `Flag.resolve()` "for performance," the same way `DefferedImport` caches its import.
 _Why it's wrong:_ `django.test.override_settings` works by temporarily mutating `settings.<APP>_APP_SETTINGS` and restoring it afterward. If `Flag` cached its result, a test using `override_settings` would silently keep seeing the _pre-override_ value, because the cached copy would never get invalidated.
 _Do instead:_ Leave `Flag` uncached — correctness under `override_settings` matters more than avoiding a dictionary lookup.
 
@@ -155,15 +158,15 @@ _Do instead:_ Implement any "look up a field by name string" helper using `getat
 ## How
 
 - **Models:** none — this app is pure Python infrastructure, no Django models of its own.
-- **Swappable settings:** `core.app_settings` declares none of its own. The plain swappable-FK strings every consuming app targets now live centrally in `config.settings.base_models`, not inside this app and not inside any individual consumer's `app_settings.py`. A consuming app's own `app_settings.py` may still declare a `LazyModelImport` field for runtime use, whose `default` points at the corresponding central string.
-- **Contracts / checks:** an optional validation helper is meant to be wired into each _consuming_ app's own `checks.py` (following that app's existing `missing_attrs`-based convention), confirming every declared `LazyImport`/`LazyModelImport` field actually resolves — via Django's real checks framework (`@register()`), not a custom error-reporting path.
-- **Migrations:** none in this app. It dictates how _other_ apps write migrations: any `swappable_dependency()` call reads the plain string directly from `config.settings.base_models` (or via a `.raw()`-style convenience, if the consuming app's `LazyModelImport` wraps it), never touching a `LazyModelImport` field at instance level from within a migration file.
+- **Swappable settings:** `core.app_settings` declares none of its own. The plain swappable-FK strings every consuming app targets now live centrally in `config.settings.base_models`, not inside this app and not inside any individual consumer's `app_settings.py`. A consuming app's own `app_settings.py` may still declare a `DefferedModel` field for runtime use, whose `default` points at the corresponding central string.
+- **Contracts / checks:** an optional validation helper is meant to be wired into each _consuming_ app's own `checks.py` (following that app's existing `missing_attrs`-based convention), confirming every declared `DefferedImport`/`DefferedModel` field actually resolves — via Django's real checks framework (`@register()`), not a custom error-reporting path.
+- **Migrations:** none in this app. It dictates how _other_ apps write migrations: any `swappable_dependency()` call reads the plain string directly from `config.settings.base_models` (or via a `.raw()`-style convenience, if the consuming app's `DefferedModel` wraps it), never touching a `DefferedModel` field at instance level from within a migration file.
 - **Signals / side effects:** the one deliberate, contained side effect in this whole app is Constance registration, triggered from `core`'s own `AppConfig.ready()` (`backend/apps/core/apps.py`), which autodiscovers every installed app's `app_settings` module.
 - **API surface:** none — not DRF-facing.
 - **Gotchas:**
-  - `LazyImport`'s cache is process-global, keyed by the exact dotted-path string. Don't `importlib.reload()` a module whose target is cached — patch the target object directly in tests instead.
+  - `DefferedImport`'s cache is process-global, keyed by the exact dotted-path string. Don't `importlib.reload()` a module whose target is cached — patch the target object directly in tests instead.
   - `Constance` field access bypasses the normal override-lookup path entirely once registered — `project_settings` only ever affects the _seed default_, never a value with an existing DB row.
-  - `django.test.override_settings` affects `Flag` and `LazyImport`/`LazyModelImport` overrides, but has no effect on `Constance` — use `constance`'s own test utilities for that type instead.
+  - `django.test.override_settings` affects `Flag` and `DefferedImport`/`DefferedModel` overrides, but has no effect on `Constance` — use `constance`'s own test utilities for that type instead.
   - **`core` is currently placed last in `INSTALLED_APPS`.** This is safe only as long as no other app's `AppConfig.ready()` reads a `Constance`-backed value — such a read would execute before `core`'s registration has run, and would fail. If that ever becomes necessary, `core` needs to move to _first_, not stay last — don't assume "last" is a permanent, self-justifying convention.
 
 ## Directory Structure
@@ -172,7 +175,7 @@ _Do instead:_ Implement any "look up a field by name string" helper using `getat
 backend/apps/core/
 ├── app_settings/
 │   ├── base.py             # SettingType, BaseSettingsMeta, BaseSettings
-│   ├── types.py             # LazyImport, LazyModelImport, Flag, Constance
+│   ├── types.py             # DefferedImport, DefferedModel, Flag, Constance
 │   ├── registry.py           # register_constance_fields() — pure registration logic, called from apps.py
 │   ├── validation.py          # optional helper for consuming apps' own checks.py
 │   └── README.md              # this file
@@ -182,7 +185,7 @@ backend/apps/core/
 
 ## Miscellaneous
 
-- **Testing notes:** `Flag` and `LazyImport`/`LazyModelImport` overrides are testable via standard `override_settings`; `Constance` requires its own DB-aware test setup instead.
+- **Testing notes:** `Flag` and `DefferedImport`/`DefferedModel` overrides are testable via standard `override_settings`; `Constance` requires its own DB-aware test setup instead.
 - **TODOs / planned follow-ups:**
   - Better names for the four setting types — current names are considered provisional.
   - Wire the validation helper into each consuming app's `checks.py` as those apps are built.

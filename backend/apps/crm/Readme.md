@@ -37,14 +37,14 @@ Every other module (Donations, Invoicing, Notifications, Expenses) needs a canon
 
 ### Descriptor-based `app_settings` framework (`core.app_settings`)
 
-**What it is:** Each app declares a `BaseSettings` subclass in `app_settings.py`. Field values are resolved at access time via descriptors (`LazyImport`, `Constance`), not at import time.
+**What it is:** Each app declares a `BaseSettings` subclass in `app_settings.py`. Field values are resolved at access time via descriptors (`DefferedImport`, `Constance`), not at import time.
 
-**Why this app needs it:** `crm` uses `LazyImport` for swappable choice classes (`PartyTypeChoices`, `CustomerTypeChoices`, `PreferenceDataTypeChoices`), the swappable preference-validator class (`PREFERNCE_TYPE_VALIDATOR`), and the auth user model (`AUTH_USER`). This lets any of these be overridden per-project via `settings.CRM_APP_SETTINGS`.
+**Why this app needs it:** `crm` uses `DefferedImport` for swappable choice classes (`PartyTypeChoices`, `CustomerTypeChoices`, `PreferenceDataTypeChoices`), the swappable preference-validator class (`PREFERNCE_TYPE_VALIDATOR`), and the auth user model (`AUTH_USER`). This lets any of these be overridden per-project via `settings.CRM_APP_SETTINGS`.
 
 **Minor example:**
 ```python
 # crm/app_settings.py
-PARTY_TYPE_CHOICES = LazyImport(default="apps.crm.constants.PartyTypeChoices")
+PARTY_TYPE_CHOICES = DefferedImport(default="apps.crm.constants.PartyTypeChoices")
 ```
 ```python
 # project settings override
@@ -61,19 +61,19 @@ CRM_APP_SETTINGS = {"PARTY_TYPE_CHOICES": "myproject.constants.CustomPartyTypeCh
 
 ### Being the _source_, not a _consumer_, of a swappable reference
 
-**The pattern:** The plain string target `CRM_CUSTOMER = "crm.Customer"` lives centrally in `config.settings.base_models`. Each _consuming_ app that needs the resolved class form declares its own `LazyImport` in its `app_settings.py`, pointing at that central string. `crm` itself declares neither — it doesn't need a swappable reference to its own model.
+**The pattern:** The plain string target `CRM_CUSTOMER = "crm.Customer"` lives centrally in `config.settings.base_models`. Each _consuming_ app that needs the resolved class form declares its own `DefferedImport` in its `app_settings.py`, pointing at that central string. `crm` itself declares neither — it doesn't need a swappable reference to its own model.
 
 **Why this app follows it:** Swappable references exist to let a consuming app be redirected at a different target model. `crm.Customer` is simply `crm.Customer` from its own perspective; there's nothing to swap from inside `crm`.
 
 ### Swappable choices and validator via `CRM_APP_SETTINGS`
 
-**The pattern:** Rather than hardcoding `PartyTypeChoices`, `CustomerTypeChoices`, etc. directly in model field definitions, they are declared as `LazyImport` settings in `CRMSettings` and accessed via `app_settings.<SETTING>`. This lets a project substitute a different choices class without touching model code.
+**The pattern:** Rather than hardcoding `PartyTypeChoices`, `CustomerTypeChoices`, etc. directly in model field definitions, they are declared as `DefferedImport` settings in `CRMSettings` and accessed via `app_settings.<SETTING>`. This lets a project substitute a different choices class without touching model code.
 
 **Why this app follows it:** The platform serves multiple client types (NGO, SMB, Individual). Different deployments may need different valid values for `party_type` or `customer_type` without forking the app.
 
 ### The preference type validator pattern
 
-**The pattern:** `PreferenceTypeValidator` is a concrete Python class (not a model) that handles validation and transformation of the `additional_meta_data` JSON field on `CustomerPreferenceType`. It is declared as a `LazyImport` setting so projects can provide a custom validator. `CustomerPreferenceType` inherits from both `BaseModel` and the resolved validator class at module load time via `PreferenceTypeValidatorOverride`.
+**The pattern:** `PreferenceTypeValidator` is a concrete Python class (not a model) that handles validation and transformation of the `additional_meta_data` JSON field on `CustomerPreferenceType`. It is declared as a `DefferedImport` setting so projects can provide a custom validator. `CustomerPreferenceType` inherits from both `BaseModel` and the resolved validator class at module load time via `PreferenceTypeValidatorOverride`.
 
 **Why this app follows it:** The `additional_meta_data` JSON has a context-dependent structure (different fields for `CHOICES` vs `BOOLEAN` data types). Encapsulating that logic in a swappable class keeps the model clean and makes the validation behaviour replaceable.
 
@@ -82,7 +82,7 @@ CRM_APP_SETTINGS = {"PARTY_TYPE_CHOICES": "myproject.constants.CustomPartyTypeCh
 **A consuming app importing `from apps.crm.models import Customer` directly.**
 _What it looks like:_ Any direct model import from another app's `models.py`, `signals.py`, or elsewhere.
 _Why it's wrong:_ Hardcodes the dependency, defeating the swappable-FK pattern — the consuming app can no longer be redirected at a different customer model without editing source code.
-_Do instead:_ Declare a `LazyImport` in the consuming app's `app_settings.py`, pointing at the central string in `config.settings.base_models`.
+_Do instead:_ Declare a `DefferedImport` in the consuming app's `app_settings.py`, pointing at the central string in `config.settings.base_models`.
 
 **Using Multi-Table Inheritance to model party types or customer types as subclasses.**
 _What it looks like:_ `class IndividualCustomer(Customer): ...` or `class DonorCustomer(Customer): ...`.
@@ -90,14 +90,14 @@ _Why it's wrong:_ Platform-wide golden rule violation — every cross-type query
 _Do instead:_ Use the `party_type` / `customer_type` choice fields already on `Customer`.
 
 **Assuming `crm` needs a `CRM_CUSTOMER` setting just because every consumer has one.**
-_What it looks like:_ Adding `CRM_CUSTOMER = LazyImport(...)` inside `CRMSettings`.
+_What it looks like:_ Adding `CRM_CUSTOMER = DefferedImport(...)` inside `CRMSettings`.
 _Why it's wrong:_ `crm` is the source, not a consumer. It defines the canonical model; there is nothing to swap from its own perspective.
-_Do instead:_ Leave `CRM_CUSTOMER` as a plain string in `config.settings.base_models`, and let only consuming apps declare `LazyImport` fields pointing at it.
+_Do instead:_ Leave `CRM_CUSTOMER` as a plain string in `config.settings.base_models`, and let only consuming apps declare `DefferedImport` fields pointing at it.
 
 **Calling `apps.get_model()` at module import time (e.g. at the top of `models.py`).**
 _What it looks like:_ `Customer = apps.get_model("crm", "Customer")` outside any function/method.
-_Why it's wrong:_ `AppRegistryNotReady` — the app registry is not populated until after all `models.py` files have been imported. `LazyImport` / `LazyModelImport` descriptors exist precisely to defer this until first attribute access, post-`django.setup()`.
-_Do instead:_ Use `LazyImport` or `LazyModelImport` in `app_settings.py`; access the resolved class via the descriptor, never at module scope.
+_Why it's wrong:_ `AppRegistryNotReady` — the app registry is not populated until after all `models.py` files have been imported. `DefferedImport` / `DefferedModel` descriptors exist precisely to defer this until first attribute access, post-`django.setup()`.
+_Do instead:_ Use `DefferedImport` or `DefferedModel` in `app_settings.py`; access the resolved class via the descriptor, never at module scope.
 
 ## How
 
