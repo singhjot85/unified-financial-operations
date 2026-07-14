@@ -3,12 +3,14 @@
 > Location: `documentation/technical-architecture/app-settings-framework.md` <br/>
 > Status: `Approved` <br/>
 > Owner: <name> <br/>
-> Last updated: 2026-07-12 <br/>
+> Last updated: 2026-07-15 <br/>
 > Related BRD: N/A — internal developer-experience / architecture infrastructure, not a user-facing feature <br/>
 > Related ADRs: None currently — see "Alternatives considered" below for the point-decisions folded into this doc <br/>
 > Implementing app(s): `core.app_settings` (new); consumed by every app defining an `app_settings.py` (`crm`, `ledger`, `notification_app`, `donation_management`, `expense_management`, and future apps) <br/>
 
 ---
+
+> **Implementation status:** `core.app_settings` is partially implemented. `base.py` has `BaseDescriptor` (full implementation) and `BaseSettings` (stub — no metaclass or registry walk yet). `types.py` has `LazyImport` and `Constance` stubs (classes with `pass`). `registry.py` is empty. `LazyModelImport` is designed in this doc but not yet implemented. `crm/app_settings.py` uses `LazyImport` and `Constance` directly (working via the descriptor mechanism in `base.py`). The full framework described here is the target design; the current code partially implements it.
 
 ## What
 
@@ -102,19 +104,17 @@ app_settings.STRICT_EMAIL_REQUIRED
 
 ```
 core/app_settings/
-├── base.py         # BaseSetting descriptor (template pattern), BaseSettings container + metaclass
-├── types.py         # LazyImport, LazyModelImport, Flag, Constance
-├── registry.py       # register_constance_fields(): builds CONSTANCE_CONFIG + fieldsets, called from AppConfig.ready()
+├── base.py         # BaseDescriptor (full implementation), BaseSettings (stub — no metaclass yet)
+├── types.py        # LazyImport (stub), Constance (stub); LazyModelImport not yet implemented
+├── registry.py     # register_constance_fields() — empty, not yet implemented
 └── __init__.py
 
 apps/<app_name>/
 ├── app_settings.py   # per-app BaseSettings subclass + `app_settings = <App>Settings()` instance
-├── apps.py           # AppConfig.ready() explicitly calls register_constance_fields(app_settings) [+ optional validation]
-├── models.py         # imports app_settings.py directly at module top (ordinary Python import semantics — no
-│                        explicit ordering hook needed; models.py cannot evaluate class bodies referencing
-│                        app_settings until the app_settings.py import has fully executed)
-├── migrations/        # uses app_settings.raw(<name>) for swappable_dependency(), never plain attribute access
-└── checks.py          # existing missing_attrs-based checks; may be extended to also validate app_settings targets
+├── apps.py           # AppConfig.ready() — Constance registration call not yet wired up
+├── models.py         # imports app_settings.py directly at module top
+├── migrations/        # uses app_settings.raw(<name>) for swappable_dependency() [once LazyModelImport is built]
+└── checks.py          # existing missing_attrs-based checks
 ```
 
 ## Miscellaneous
@@ -127,4 +127,5 @@ apps/<app_name>/
   - Multi-tenancy: `Constance` values are project-wide (public-schema), not per-tenant — any setting needing per-tenant runtime editability should continue to use the tenant `Configurations` JSON field described in the platform summary, not `Constance`. Worth flagging explicitly in app-level LLDs wherever a `Constance` field is declared, so it isn't mistaken for tenant-scoped.
   - `LazyImport`'s cache is process-global, keyed by path string — fine for production; under test, don't `importlib.reload()` a module whose resolved object is cached, patch the target object instead.
 - **Changelog:**
+  - 2026-07-15 — Added implementation status note: `BaseDescriptor` in `base.py` is fully implemented; `BaseSettings` is a stub; `types.py` has stub `LazyImport`/`Constance`; `LazyModelImport` and `Flag` are designed but not yet coded; `registry.py` is empty. Updated directory structure accordingly.
   - 2026-07-12 — Initial version, consolidating the full design discussion (setting-type contracts, lifecycle analysis, `LazyModelImport`/swappable-FK separation, Constance registration timing).

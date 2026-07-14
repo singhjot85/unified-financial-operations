@@ -56,20 +56,22 @@ services:
       timeout: 30s
       retries: 5
 
-  frontend:
-    build:
-      context: ../../
-      dockerfile: compose/local/frontend/Dockerfile
-    container_name: unfo_frontend
-    restart: unless-stopped
-    volumes:
-      - ../../frontend:/frontend
-      # - ../../frontend/node_modules:/frontend/node_modules
-      - ../../compose/local/frontend/scripts:/scripts
-    ports:
-      - "5173:5173"
-    env_file:
-      - ./frontend/.env
+  # TODO: Think of a better way to containerize this,
+  # or should we skip frontend containerization, they already ship stable dev-server's
+  # frontend:
+  #   build:
+  #     context: ../../
+  #     dockerfile: compose/local/frontend/Dockerfile
+  #   container_name: unfo_frontend
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ../../frontend:/frontend
+  #     # - ../../frontend/node_modules:/frontend/node_modules
+  #     - ../../compose/local/frontend/scripts:/scripts
+  #   ports:
+  #     - "5173:5173"
+  #   env_file:
+  #     - ./frontend/.env
 
   unfo_cache:
     image: valkey/valkey:8.1.5-alpine

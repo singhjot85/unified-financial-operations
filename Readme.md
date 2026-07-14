@@ -80,28 +80,25 @@ project-root/
 |   |- technical-architecture/
 |   |   |- Readme.md                        # HLD index, links to ADRs + app registry
 |   |   |- architecture-decision-records/   # Record for common architectural decisions
-|   |       |- 0001-swappable-fk-pattern.md
-|	|		|- ...
+|   |       |- adr-template.md              # Template for new ADRs
+|   |       |- ...                          # (no ADRs written yet)
 |   |- logos/
-|	|- business-requirement-documents/      # Common agentic configs, skills, plugins
+|	|- business-requirement-documents/      # Business requirements and product POV docs
 |- backend/
-|   |- README.md                            # index of all apps, links to each
+|   |- Readme.md                            # index of all apps, links to each
 |   |- apps/
-|       |- crm/README.md                    # LLD: models, swappable settings, checks.py
-|       |- notification_app/README.md
-|       |- ledger/README.md
+|       |- crm/Readme.md                    # LLD: models, swappable settings, checks.py
+|       |- (future apps)/Readme.md
 |- frontend/
-|   |- README.md
+|   |- Readme.md                            # (to be created)
 |- compose/
 |- .vscode/
-|- .github/
-|- .agents/
 ```
 
 - [**business-requirement-documents:**](./documentation/business-requirement-documents/Readme.md) Houses all the business related documentation, this gives a product side pov and overview of a feature and its implementation.
 - [**technical-architecture:**](./documentation/technical-architecture/Readme.md) Houses all the technical high level design and architecture for a feature or functionality.
 - [**Backend LLD Index:**](./backend/Readme.md) Backend general practices, project conventions and Backend LLD Index.
-- [**Frontend LLD Index:**](./backend/Readme.md) Frontend general practices and project conventions.
+- [**Frontend LLD Index:**](./frontend/Readme.md) Frontend general practices and project conventions.
 - [**logos:**](./documentation/logos/) Logos used across the repository.
 
 ### Rules

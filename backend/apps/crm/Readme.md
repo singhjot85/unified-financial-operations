@@ -3,110 +3,172 @@
 > Location: `backend/apps/crm/README.md` <br/>
 > Status: `Active` <br/>
 > Owner: <name> <br/>
-> Last updated: 2026-07-14 <br/>
-> Implements HLD: [`documentation/technical-architecture/crm.md`] <br/>
+> Last updated: 2026-07-15 <br/>
+> Implements HLD: [`documentation/technical-architecture/crm.md`](../../../documentation/technical-architecture/crm.md) <br/>
 > Related ADRs: None <br/>
 
 ---
 
 ## What
 
-`crm` owns the platform's canonical identity model, `crm.Customer`, along with the sales/donor-cultivation domain built on top of it: `Lead`, `Pipeline`/`Stage`, and `Deal`. `crm.Customer` fully replaces the old, project's original `Customer`/`Counterparty` model — this is a fresh start, no data migration from that model. This app is the **source** of the swappable identity reference every other app consumes (`notification_app`, `ledger`, `donation_management`, `expense_management`) — it does not itself define a `CRM_CUSTOMER`-style setting, because it has no need to swap out its own canonical model. What it does _not_ cover: the hand-off from a Won `Deal` into a `Donation` or `Invoice` — that boundary is intentionally still open (see Miscellaneous).
+`crm` owns the platform's canonical identity model, `crm.Customer`, along with its related sub-models: `CustomerEmail`, `CustomerPhone`, `CustomerEntity`, `CustomerPreferenceType`, and `CustomerPreference`. It is the **source** of the swappable identity reference every other app consumes — it does not itself define a `CRM_CUSTOMER`-style swappable setting, because it has no need to swap out its own canonical model.
+
+> **Implementation status:** The `Customer` identity layer and preference system are implemented. The sales/relationship layer described in the HLD (`Lead`, `Pipeline`, `Stage`, `Deal`, `DealStageHistory`) is **not yet built** — those models are HLD-planned but absent from the current codebase. This doc covers only what currently exists.
 
 ## Why
 
-Both client types this platform serves — NGOs running donor cultivation, and SMBs running prospect-to-customer sales — need the same underlying shape: track a person or organization, move them through stages, eventually convert them into a paying/giving relationship. Rather than let `donation_management` and a future SMB sales app each invent their own version of "a contact," this app owns that identity once, and every other app references it through the swappable-FK convention rather than importing it directly. This keeps `crm` reusable as a standalone app across projects that may not need the Lead/Pipeline/Deal layer at all — a project could theoretically consume just `crm.Customer` via the swappable reference without installing the rest of this app's sales-pipeline models, though that's not the platform's current configuration.
+Every other module (Donations, Invoicing, Notifications, Expenses) needs a canonical notion of "who." Rather than let each app invent its own version of "a contact," this app owns that identity once, and every other app references it through the swappable-FK convention. This keeps `crm` reusable as a standalone identity layer across projects.
 
 ## Python / Django Concepts
 
 ### `on_delete` behavior, specifically `PROTECT`
 
-**What it is:** Every `ForeignKey` needs an `on_delete` argument telling Django what to do to rows that reference a target row when that target gets deleted. `CASCADE` deletes the referencing rows too; `SET_NULL` nulls the FK; `PROTECT` raises `ProtectedError` and refuses the delete outright if any referencing rows exist.
+**What it is:** Every `ForeignKey` needs an `on_delete` argument telling Django what to do to rows that reference a target row when that target gets deleted. `PROTECT` raises `ProtectedError` and refuses the delete outright if any referencing rows exist.
 
-**Why this app needs it:** `Lead.converted_customer` uses `PROTECT` — once a `Lead` has converted into a `Customer`, that `Customer` cannot be deleted while the `Lead` record referencing it still exists, because doing so would silently sever the audit trail of "which lead became which customer." `PROTECT` is what turns "someone accidentally deletes a converted customer" from silent data loss into a loud, immediate error.
+**Why this app needs it:** `CustomerEmail` and `CustomerPhone` use `PROTECT` on their `customer` FK — once contact records exist for a Customer, that Customer cannot be hard-deleted while those records remain. This is expected; use the soft-delete path instead (see BaseModel).
 
-**Minor example:** `models.ForeignKey(Customer, on_delete=models.PROTECT)` — attempting `customer.delete()` while a `Lead` still points at it via this field raises `ProtectedError` instead of succeeding.
-
-**The open question this creates:** `PROTECT` only stops a _hard_ delete. If this project wants `Customer` records to ever be removable at all (e.g. GDPR-style deletion requests, or routine cleanup), `PROTECT` implies you need a **soft-delete** path instead — mark the row inactive rather than actually deleting it — because a hard delete will always be blocked as long as history exists. This is flagged as an open decision below, not yet resolved.
+**Minor example:** `models.ForeignKey(Customer, on_delete=models.PROTECT)` — attempting `customer.delete(soft=False)` while any `CustomerEmail` still points at it raises `ProtectedError`.
 
 ### Concrete (single-table) inheritance vs. Multi-Table Inheritance (MTI)
 
-**What it is:** Django offers MTI — a child model with its own base class creates a separate DB table joined via an implicit `OneToOneField` to the parent's table — as one way to model "a specialized version of X." The platform-wide alternative used here is a single concrete table per real-world entity, with variation captured in fields (like a `sub_type`/`stage` choice field) rather than a class hierarchy.
+**What it is:** MTI creates a separate DB table per child model, joined via a `OneToOneField`. The platform-wide alternative is a single concrete table per entity, with variation captured via choice fields.
 
-**Why this app needs it:** `Customer` needs to represent both an NGO donor and an SMB prospect without becoming two different database tables that both need joining back together for any cross-cutting query (e.g. "all customers created this month," regardless of client type). A single table keeps that trivial; MTI would mean every such query needs a join, and every migration touching a shared field needs to consider both tables. This is a platform-wide rule (see the Anti-patterns section below), not specific to this app, but `Customer`/`Lead`/`Deal` are exactly the kind of "same entity, different flavor" case MTI looks tempting for.
+**Why this app needs it:** `Customer` represents both individual people and business entities (`party_type`), and different business contexts (NGO donor, SMB client, backoffice — `customer_type`), without separate tables. A single table keeps cross-type queries trivial.
+
+### Descriptor-based `app_settings` framework (`core.app_settings`)
+
+**What it is:** Each app declares a `BaseSettings` subclass in `app_settings.py`. Field values are resolved at access time via descriptors (`LazyImport`, `Constance`), not at import time.
+
+**Why this app needs it:** `crm` uses `LazyImport` for swappable choice classes (`PartyTypeChoices`, `CustomerTypeChoices`, `PreferenceDataTypeChoices`), the swappable preference-validator class (`PREFERNCE_TYPE_VALIDATOR`), and the auth user model (`AUTH_USER`). This lets any of these be overridden per-project via `settings.CRM_APP_SETTINGS`.
+
+**Minor example:**
+```python
+# crm/app_settings.py
+PARTY_TYPE_CHOICES = LazyImport(default="apps.crm.constants.PartyTypeChoices")
+```
+```python
+# project settings override
+CRM_APP_SETTINGS = {"PARTY_TYPE_CHOICES": "myproject.constants.CustomPartyTypeChoices"}
+```
+
+### Abstract validator mixin (`AbstractPreferenceTypeValidator`)
+
+**What it is:** An abstract base class (`abc.ABC`) in `abstacts.py` that defines the interface a preference-type validator must implement: `validate_metadata`, `set_metadata`, `get_metadata`.
+
+**Why this app needs it:** `CustomerPreferenceType` inherits from both `BaseModel` and a validator class resolved at runtime via `app_settings.PREFERNCE_TYPE_VALIDATOR`. Decoupling the interface (abstract class) from the default implementation (`PreferenceTypeValidator`) allows projects to swap in custom validation logic without modifying model code. The resolved class is captured once at module load into `PreferenceTypeValidatorOverride`.
 
 ## LLD Concepts
 
 ### Being the _source_, not a _consumer_, of a swappable reference
 
-**The pattern:** The plain string target, `CRM_CUSTOMER = "crm.Customer"`, is declared once, centrally, in `config.settings.base_models` — not inside `crm` and not duplicated inside each consuming app's own `app_settings.py`. Each consuming app that needs the resolved class form declares its own `LazyModelImport` field in its `app_settings.py`, pointing at that central string, with an accompanying `checks.py` validating the resolved model exposes what that consumer needs. `crm` itself declares neither — it doesn't need a swappable reference to its own model.
+**The pattern:** The plain string target `CRM_CUSTOMER = "crm.Customer"` lives centrally in `config.settings.base_models`. Each _consuming_ app that needs the resolved class form declares its own `LazyImport` in its `app_settings.py`, pointing at that central string. `crm` itself declares neither — it doesn't need a swappable reference to its own model.
 
-**Why this app follows it:** Swappable references exist to let a _consuming_ app be redirected at a _different_ target model by project override — that's meaningless for the app that defines the canonical model in the first place. `crm.Customer` is simply `crm.Customer`; there's nothing to swap it for from `crm`'s own point of view. Understanding this distinction matters because it's easy to assume, by analogy with every consumer app you've seen, that `crm` must have a `CRM_CUSTOMER` setting somewhere too — it doesn't, on purpose.
+**Why this app follows it:** Swappable references exist to let a consuming app be redirected at a different target model. `crm.Customer` is simply `crm.Customer` from its own perspective; there's nothing to swap from inside `crm`.
 
-### The runtime contract, not the schema, is what other apps depend on
+### Swappable choices and validator via `CRM_APP_SETTINGS`
 
-**The pattern:** Consuming apps don't import `crm.Customer` and inspect its fields directly. They declare `REQUIRED_CRM_CUSTOMER_ATTRS` (currently `id`, `display_name`, `email`, `phone`) and validate the swapped-in target actually exposes those, via `core.contracts.missing_attrs` and a `checks.py` system check — using `model._meta.get_field(name)` for real fields and `hasattr()` for methods/properties. This means `crm.Customer` is free to have far more fields than any single consumer needs, as long as the ones each consumer declared as required stay present.
+**The pattern:** Rather than hardcoding `PartyTypeChoices`, `CustomerTypeChoices`, etc. directly in model field definitions, they are declared as `LazyImport` settings in `CRMSettings` and accessed via `app_settings.<SETTING>`. This lets a project substitute a different choices class without touching model code.
 
-**Why this app follows it:** This is what actually makes `crm.Customer` swappable in practice, not just in principle — a project can substitute a different customer model entirely, and as long as the substitute satisfies each consumer's declared attribute contract, nothing downstream breaks. It also means changes to `crm.Customer` that don't touch a currently-required attribute are safe to make freely; changes that _would_ remove or rename a required attribute are a cross-app breaking change, and the `checks.py` system checks are what catch that at `manage.py check` time rather than at some unpredictable runtime failure in a consuming app.
+**Why this app follows it:** The platform serves multiple client types (NGO, SMB, Individual). Different deployments may need different valid values for `party_type` or `customer_type` without forking the app.
 
-### Feature-agnostic core, feature-gated consumers
+### The preference type validator pattern
 
-**The pattern:** `crm`'s models (`Customer`, `Lead`, `Pipeline`/`Stage`, `Deal`) don't themselves know or care whether a given tenant is an NGO or SMB — that distinction lives in how _consuming_ apps interpret and gate on the data, not in `crm`'s own schema beyond whatever `sub_type`-style discriminator fields are needed for concrete-table variation (see Concepts above).
+**The pattern:** `PreferenceTypeValidator` is a concrete Python class (not a model) that handles validation and transformation of the `additional_meta_data` JSON field on `CustomerPreferenceType`. It is declared as a `LazyImport` setting so projects can provide a custom validator. `CustomerPreferenceType` inherits from both `BaseModel` and the resolved validator class at module load time via `PreferenceTypeValidatorOverride`.
 
-**Why this app follows it:** Keeping client-type-specific behavior out of `crm` itself is what lets the same `Lead`→`Deal` pipeline serve donor cultivation and sales prospecting without `crm` needing to know about either domain's downstream logic (tax receipts vs. invoices). The feature-gating itself belongs to the platform's 3-layer flag system, not to this app.
+**Why this app follows it:** The `additional_meta_data` JSON has a context-dependent structure (different fields for `CHOICES` vs `BOOLEAN` data types). Encapsulating that logic in a swappable class keeps the model clean and makes the validation behaviour replaceable.
 
 ## Anti-patterns
 
-**Using Multi-Table Inheritance to model NGO vs. SMB customers as subclasses.**
-_What it looks like:_ `class NGODonor(Customer): ...` and `class SMBProspect(Customer): ...`, each with their own table, relying on Django's automatic parent-join.
-_Why it's wrong:_ This is the platform's golden rule violation — every cross-type query needs a join back to the base table, migrations affecting shared fields now touch multiple tables, and it directly contradicts the "single concrete table" decision already locked in for this project.
-_Do instead:_ A `sub_type` (or similarly-named) choice field on the single `Customer` table, with behavior differences handled in application logic or consuming apps, not in the schema.
-
 **A consuming app importing `from apps.crm.models import Customer` directly.**
-_What it looks like:_ Any direct import of `crm`'s model from another app's `models.py`, `signals.py`, or elsewhere, instead of going through that app's own `app_settings.py` swappable reference.
-_Why it's wrong:_ It hardcodes the dependency, defeating the entire point of the swappable-FK pattern — a project can no longer redirect that consumer at a different customer model without editing its source code, and `crm` can no longer be omitted or replaced in a project that doesn't want this specific identity model.
-_Do instead:_ Declare a `LazyModelImport` in the consuming app's own `app_settings.py`, pointing at the central string in `config.settings.base_models`, per the "Being the source, not a consumer" concept above.
+_What it looks like:_ Any direct model import from another app's `models.py`, `signals.py`, or elsewhere.
+_Why it's wrong:_ Hardcodes the dependency, defeating the swappable-FK pattern — the consuming app can no longer be redirected at a different customer model without editing source code.
+_Do instead:_ Declare a `LazyImport` in the consuming app's `app_settings.py`, pointing at the central string in `config.settings.base_models`.
 
-**Assuming a required attribute is safe to remove from `Customer` because nothing in `crm` itself uses it.**
-_What it looks like:_ Deleting or renaming a field on `Customer` based only on checking `crm`'s own code for references.
-_Why it's wrong:_ The actual dependency surface is every consuming app's declared `REQUIRED_CRM_CUSTOMER_ATTRS`, which `crm` has no direct visibility into without running (or reasoning about) those apps' own `checks.py`. A field can look "unused" from inside `crm` while several other apps' system checks would immediately start failing.
-_Do instead:_ Treat every consuming app's `REQUIRED_*_ATTRS` list as the actual contract surface before changing or removing any field — grep for `REQUIRED_CRM_CUSTOMER_ATTRS` across the codebase, don't rely on `crm`'s own usage as the signal.
+**Using Multi-Table Inheritance to model party types or customer types as subclasses.**
+_What it looks like:_ `class IndividualCustomer(Customer): ...` or `class DonorCustomer(Customer): ...`.
+_Why it's wrong:_ Platform-wide golden rule violation — every cross-type query needs a join, migrations touching shared fields must consider multiple tables.
+_Do instead:_ Use the `party_type` / `customer_type` choice fields already on `Customer`.
+
+**Assuming `crm` needs a `CRM_CUSTOMER` setting just because every consumer has one.**
+_What it looks like:_ Adding `CRM_CUSTOMER = LazyImport(...)` inside `CRMSettings`.
+_Why it's wrong:_ `crm` is the source, not a consumer. It defines the canonical model; there is nothing to swap from its own perspective.
+_Do instead:_ Leave `CRM_CUSTOMER` as a plain string in `config.settings.base_models`, and let only consuming apps declare `LazyImport` fields pointing at it.
+
+**Calling `apps.get_model()` at module import time (e.g. at the top of `models.py`).**
+_What it looks like:_ `Customer = apps.get_model("crm", "Customer")` outside any function/method.
+_Why it's wrong:_ `AppRegistryNotReady` — the app registry is not populated until after all `models.py` files have been imported. `LazyImport` / `LazyModelImport` descriptors exist precisely to defer this until first attribute access, post-`django.setup()`.
+_Do instead:_ Use `LazyImport` or `LazyModelImport` in `app_settings.py`; access the resolved class via the descriptor, never at module scope.
 
 ## How
 
 - **Models:**
-  - `Customer` — canonical identity model, both NGO donor and SMB prospect representations live here on one concrete table.
-  - `Lead` — pre-conversion prospect/donor-candidate; `converted_customer` is a `ForeignKey(Customer, on_delete=PROTECT)` — see Concepts above for why `PROTECT` specifically, and the soft-delete question it raises.
-  - `Pipeline` / `Stage` — the ordered stages a `Deal` moves through; scoped to allow different pipelines for different flows (donor cultivation vs. SMB sales) without `crm` needing to hardcode either.
-  - `Deal` — the in-flight opportunity tied to a `Customer`, moving through a `Pipeline`'s `Stage`s toward Won/Lost.
-- **Swappable settings:** none defined by `crm` itself (see LLD Concepts — this app is the source, not a consumer). The plain `CRM_CUSTOMER = "crm.Customer"` string lives centrally in `config.settings.base_models`; consuming apps that need the resolved class declare their own `LazyModelImport` in their `app_settings.py`, pointing at that central string.
-- **Contracts / checks:** `crm` doesn't validate its own model against a `REQUIRED_*_ATTRS` list (nothing to validate against itself) — but it is the implicit contract every consuming app's checks validate against. Current baseline contract, per those consumers: `id`, `display_name`, `email`, `phone`. Whether this needs to expand is an open question (see Miscellaneous).
-- **Migrations:** fresh-start migrations for `Customer`/`Lead`/`Pipeline`/`Stage`/`Deal` — no data migration from the old `Customer`/`Counterparty` model, which is deleted outright rather than migrated.
-- **Signals / side effects:** the Won-`Deal` → `Donation`/`Invoice` hand-off is not yet implemented — whether this is signal-driven (a `Deal` status change firing a signal that `donation_management`/a future invoicing app listens for) or explicitly orchestrated some other way is one of the open questions below.
-- **API surface:** not yet finalized in this doc — to be filled in once the DRF serializers/views layer for CRM is built.
+  - `Customer` — canonical identity model. Inherits `BaseModel` + `AbstractParty` (suffix, first_name, middle_name, last_name, business_name). Key fields: `party_type` (Individual / Entity), `customer_type` (Donor / BackOffice / Client), `customer` (self-referential FK for hierarchical grouping, nullable), `dob`, `user` (FK to `AUTH_USER`, nullable, `PROTECT`).
+  - `CustomerEmail` — one-to-many emails per Customer. Fields: `is_primary`, `email`, `type` (Primary/Secondary/Tertiary). FK to `Customer` with `PROTECT`.
+  - `CustomerPhone` — one-to-many phone numbers per Customer. Fields: `is_primary`, `phone`, `type` (Primary/Secondary/Tertiary). FK to `Customer` with `PROTECT`.
+  - `CustomerEntity` — links a Customer to an arbitrary other model instance via a `GenericForeignKey` (`entity_content_type` + `entity_object_id`). FK to `Customer` with `PROTECT`.
+  - `PreferenceTypeValidator` — concrete implementation of `AbstractPreferenceTypeValidator`. Not a model; lives in `models.py` as the default class resolved by `app_settings.PREFERNCE_TYPE_VALIDATOR`. Handles metadata validation for `CustomerPreferenceType`.
+  - `CustomerPreferenceType` — defines a named preference key (`preference_name`), its `data_type` (integer / boolean / string / choices), and an `additional_meta_data` JSON field holding label, default, multi-select flag, and optional choices list. Inherits from `BaseModel` and the resolved validator class.
+  - `CustomerPreference` — the per-customer value for a given `CustomerPreferenceType`. FK to both `CustomerPreferenceType` and `Customer` (both `PROTECT`). Value stored in a `JSONField`.
+
+- **Swappable settings (`CRM_APP_SETTINGS`):**
+
+  | Setting | Default | Purpose |
+  | :------ | :------ | :------ |
+  | `PARTY_TYPE_CHOICES` | `apps.crm.constants.PartyTypeChoices` | Choices for `Customer.party_type` |
+  | `CUSTOMER_TYPE_CHOICES` | `apps.crm.constants.CustomerTypeChoices` | Choices for `Customer.customer_type` |
+  | `PREFERENCE_DATA_TYPE_CHOICES` | `apps.crm.constants.PreferenceDataTypeChoices` | Choices for `CustomerPreferenceType.data_type` |
+  | `PREFERNCE_TYPE_VALIDATOR` | `apps.crm.models.PreferenceTypeValidator` | Validator class mixed into `CustomerPreferenceType` |
+  | `AUTH_USER` | `django.contrib.auth.models.User` | Target for `Customer.user` FK |
+  | `ENABLE_SOME_CUSTOMER_RELATED_FLAG` | `True` | Example Constance-backed flag (admin-editable) |
+
+- **Contracts / checks:** `crm` currently has no `checks.py`. It is the identity source; consuming apps validate the shape of `crm.Customer` against their own `REQUIRED_CRM_CUSTOMER_ATTRS` lists in their own `checks.py` files.
+
+- **Migrations:** Standard — no data migration from any prior model. `crm` is a fresh-start identity layer.
+
+- **Signals / side effects:** None currently implemented.
+
+- **API surface:** `serializers.py` and `views.py` exist but are not yet finalized — to be filled in once the DRF layer for CRM is built.
+
 - **Gotchas:**
-  - Don't assume `crm` needs a `CRM_CUSTOMER` setting just because every consumer has one — it doesn't, by design (see LLD Concepts).
-  - `Lead.converted_customer`'s `PROTECT` means bulk-delete tooling (admin actions, cleanup scripts) that touches `Customer` rows will start raising `ProtectedError` the moment any of those customers have an associated converted `Lead` — this is expected, not a bug, but worth knowing before writing any delete-adjacent tooling.
+  - `PREFERNCE_TYPE_VALIDATOR` has a typo in the setting name (missing 'E': `PREFERNCE` not `PREFERENCE`). This is the live spelling used in `app_settings.py` and `models.py` — do not rename it without a coordinated find-replace, as it would be a breaking change for any project overriding this setting.
+  - `CustomerPreferenceType` inherits from the *resolved* validator class captured at module load time as `PreferenceTypeValidatorOverride = app_settings.PREFERNCE_TYPE_VALIDATOR`. This means the MRO (method resolution order) is set once when `models.py` is first imported — a runtime `CRM_APP_SETTINGS` override applied after that point has no effect on already-imported models.
+  - `Customer.customer` is a self-referential FK (`ForeignKey("self", on_delete=SET_NULL)`) — used for grouping related customers (e.g. an individual under a corporate entity). Avoid deep recursive trees; there is no cycle-detection guard.
 
 ## Directory Structure
 
 ```
 backend/apps/crm/
-├── models.py         # Customer, Lead, Pipeline, Stage, Deal
-├── migrations/
-├── serializers.py       # not yet finalized
-├── views.py            # not yet finalized
+├── __init__.py
+├── abstacts.py          # AbstractPreferenceTypeValidator — interface for the swappable validator
 ├── admin.py
-└── README.md            # this file
+├── app_settings.py      # CRMSettings (BaseSettings subclass) + app_settings instance
+├── apps.py              # CrmConfig (AppConfig)
+├── constants.py         # CustomerTypeChoices, PartyTypeChoices, EmailTypeChoices, PhoneTypeChoices, PreferenceDataTypeChoices
+├── migrations/
+│   └── __init__.py
+├── models.py            # Customer, CustomerEmail, CustomerPhone, CustomerEntity, PreferenceTypeValidator, CustomerPreferenceType, CustomerPreference
+├── serializers.py       # not yet finalized
+├── views.py             # not yet finalized
+└── Readme.md            # this file
 ```
 
 ## Miscellaneous
 
-- **Open questions (carried over from the BRD/HLD, not yet decided):**
-  - **Won-Deal → Donation/Invoice hand-off mechanism.** Signal-driven vs. explicitly orchestrated by the consuming app; affects whether `crm` needs to expose any hook at all, or whether this lives entirely outside `crm`.
-  - **Whether `REQUIRED_CRM_CUSTOMER_ATTRS` needs to expand** beyond `id`/`display_name`/`email`/`phone` — likely to surface as consuming apps (`donation_management`, a future invoicing app) get built out and discover they need more than the current baseline.
-  - **Soft-delete dependency implied by `Lead.converted_customer`'s `PROTECT`.** If `Customer` records need to be removable at all, this app will need a `SoftDeleteMixin`-style pattern (consistent with the platform's existing mixin conventions) rather than relying on hard deletes ever succeeding once a `Lead` conversion exists.
-- **Testing notes:** not yet documented — to be filled in once factories/fixtures for `Customer`/`Lead`/`Deal` exist.
-- **TODOs / planned follow-ups:** per-app `Protocol` classes (platform-wide planned follow-up) scoped to what each consumer of `crm.Customer` actually touches, as a static-typing layer on top of the runtime `REQUIRED_*_ATTRS` checks.
+- **HLD-planned, not yet implemented:** `Lead`, `Pipeline`, `Stage`, `Deal`, `DealStageHistory`, and `CustomerAddress` models described in the HLD (`documentation/technical-architecture/crm.md`) do not yet exist in this app. When built, update this LLD with their model descriptions, FK notes, and the `PROTECT` / soft-delete consideration for `Lead.converted_customer`.
+
+- **Open questions:**
+  - **Won-Deal → Donation/Invoice hand-off mechanism** — signal-driven vs. explicitly orchestrated; not yet relevant since Deal is not built.
+  - **`REQUIRED_CRM_CUSTOMER_ATTRS` baseline** — consuming apps will need to declare which fields they depend on once they are built (`id`, `display_name`, `email`, `phone` per the HLD baseline — but `Customer` currently doesn't have a `display_name` field; it has `AbstractParty` name parts instead). This needs to be resolved when the first consuming app is wired up.
+  - **Soft-delete vs. `PROTECT`** — `CustomerEmail`/`CustomerPhone`/`CustomerEntity` all use `PROTECT`, meaning hard-deleting a `Customer` will always fail while any of these exist. Soft-delete (via `BaseModel.delete()`) is the expected path.
+  - **`PREFERNCE_TYPE_VALIDATOR` typo** — worth fixing in a coordinated rename before more apps depend on it.
+
+- **Testing notes:** Not yet documented — to be filled in once factories/fixtures for `Customer` and related models exist.
+
+- **TODOs / planned follow-ups:**
+  - Per-app `Protocol` classes (platform-wide planned follow-up) for static typing of the `crm.Customer` contract.
+  - `checks.py` once consuming apps are built and a formal `REQUIRED_CRM_CUSTOMER_ATTRS` contract is locked in.
+  - Build the `Lead`, `Pipeline`, `Stage`, `Deal`, `DealStageHistory`, `CustomerAddress` models per HLD.
+
 - **Changelog:**
-  - 2026-07-14 — Initial LLD, guide-style with Concepts/Anti-patterns sections.
+  - 2026-07-15 — Corrected LLD to match actual implementation: replaced Lead/Pipeline/Stage/Deal descriptions with the real model set (CustomerEmail, CustomerPhone, CustomerEntity, PreferenceTypeValidator, CustomerPreferenceType, CustomerPreference); corrected directory structure; documented app_settings; added PREFERNCE_TYPE_VALIDATOR typo gotcha.
+  - 2026-07-14 — Initial LLD (described HLD-planned models, not yet reflecting actual code).

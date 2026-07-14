@@ -64,13 +64,17 @@ class DynamicReadOnlyModelSerializer(ReadOnlyModelSerializer):
         return read_only_fields
 
     def __init__(self, *args, **kwargs):
+        # Initialize the base ModelSerializer first
+        super(ReadOnlyModelSerializer, self).__init__(*args, **kwargs)
 
         if self.read_only_fields:
             for field_name in self.read_only_fields:
                 if field_name in self.fields:
                     self.fields[field_name].read_only = True
         else:
-            super().__init__(*args, **kwargs)
+            # If no read_only_fields are specified, behave like a ReadOnlyModelSerializer
+            for field in self.fields.values():
+                field.read_only = True
 
 
 class ConditionalReadOnlySerializer(DynamicReadOnlyModelSerializer):
@@ -86,7 +90,7 @@ class ConditionalReadOnlySerializer(DynamicReadOnlyModelSerializer):
 
     Usage:
 
-        >>> class UserSerializer(DynamicReadOnlyModelSerializer):
+        >>> class UserSerializer(ConditionalReadOnlySerializer):
         >>>     class Meta:
         >>>         model = User
         >>>         fields = ['id', 'username', 'email', 'password']
@@ -101,16 +105,18 @@ class ConditionalReadOnlySerializer(DynamicReadOnlyModelSerializer):
         return read_only_fields
 
     def __init__(self, *args, **kwargs):
-        request = self.context.get("request")
-        _meta = getattr(self, "Meta", None)
-
-        if request and request.user.is_staff:
-            fields = getattr(_meta, "conditional_read_only", [])
-            for field in fields:
-                field.read_only = False
-        else:
-            original_readonly = self.read_only_fields
-            original_readonly.extend(self.conditional_read_only_fields)
-            setattr(_meta, "read_only_fields", original_readonly)
-
         super().__init__(*args, **kwargs)
+
+        request = self.context.get("request")
+        is_staff = request and request.user and getattr(request.user, "is_staff", False)
+
+        if is_staff:
+            fields = self.conditional_read_only_fields
+            for field_name in fields:
+                if field_name in self.fields:
+                    self.fields[field_name].read_only = False
+        else:
+            fields = self.conditional_read_only_fields
+            for field_name in fields:
+                if field_name in self.fields:
+                    self.fields[field_name].read_only = True

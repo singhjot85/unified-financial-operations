@@ -36,7 +36,8 @@ class NotificationLog(...):
 
 ```python
 # project_settings.py
-NOTIFICATION_APP_SETTINGS = {
+# Override key is <APP_LABEL_UPPER>_APP_SETTINGS — e.g. CRM_APP_SETTINGS, not NOTIFICATION_APP_SETTINGS
+CRM_APP_SETTINGS = {
     "CRM_CUSTOMER": settings.AUTH_USER_MODEL,  # swap target entirely
 }
 ```
@@ -143,4 +144,21 @@ class NotificationPartyLike(Protocol):
 
 ## Architectural Index
 
-- 
+### High-Level Design Docs (`documentation/technical-architecture/`)
+
+| Document | Status | Implementing app(s) |
+| :------- | :----- | :------------------ |
+| [app-settings-framework.md](./app-settings-framework.md) — Core App Settings Framework | Approved | `core.app_settings` |
+| [crm.md](./crm.md) — Customer Relationship Management | Draft | `apps.crm` (identity layer implemented; Lead/Pipeline/Deal not yet built) |
+
+### Backend LLD Index
+
+See [`backend/Readme.md`](../../backend/Readme.md) for the full app registry table with links to each app's LLD.
+
+### Architecture Decision Records (`architecture-decision-records/`)
+
+No ADRs have been formally written yet. Cross-cutting decisions currently documented inline in HLD docs:
+- **Swappable cross-app FK pattern** — documented in [Readme.md](./Readme.md) (this file) and [app-settings-framework.md](./app-settings-framework.md).
+- **No Multi-Table Inheritance** — documented in app LLDs; applies platform-wide.
+
+When a decision needs to be locked in formally, use the [`adr-template.md`](./architecture-decision-records/adr-template.md).
