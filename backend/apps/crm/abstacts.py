@@ -1,8 +1,13 @@
-import abc
 import typing
 
 
-class AbstractPreferenceTypeValidator(abc.ABC):
+class AbstractPreferenceTypeValidator:
+    """Abstract base for preference type validation logic.
+
+    NOTE: Intentionally does NOT use abc.ABC — Django's ModelBase metaclass and
+    ABCMeta are incompatible in multiple inheritance. Subclasses that don't
+    implement the required methods will raise NotImplementedError at call time.
+    """
 
     _metadata_fields: tuple
 
@@ -11,7 +16,6 @@ class AbstractPreferenceTypeValidator(abc.ABC):
     data_type: str
     additional_meta_data: dict
 
-    @abc.abstractmethod
     def validate_metadata(self, exclude=None) -> dict:
         """Validate CustomerPreferenceType MetaData and raise appropriate errors.
 
@@ -21,9 +25,8 @@ class AbstractPreferenceTypeValidator(abc.ABC):
         Returns:
             Cleaned MetaData dict
         """
-        ...
+        raise NotImplementedError(f"{self.__class__.__name__} must implement validate_metadata()")
 
-    @abc.abstractmethod
     def set_metadata(self, is_multi: bool, label: str, default_value: typing.Any, choices: list = None) -> dict:
         """Setter for ``additional_meta_data`` JSON, Extend this setter if you add more fields
 
@@ -36,7 +39,7 @@ class AbstractPreferenceTypeValidator(abc.ABC):
         Returns:
             metadata (dict): Metadata Constructed and updated to ``additional_meta_data``
         """
-        ...
+        raise NotImplementedError(f"{self.__class__.__name__} must implement set_metadata()")
 
     def get_metadata(self) -> tuple:
         """Get all the meta data fields
@@ -44,4 +47,4 @@ class AbstractPreferenceTypeValidator(abc.ABC):
         Returns:
             Tuple of all the value(s) extracted from ``additional_meta_data``
         """
-        ...
+        raise NotImplementedError(f"{self.__class__.__name__} must implement get_metadata()")
