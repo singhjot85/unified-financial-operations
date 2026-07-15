@@ -22,7 +22,9 @@ class Customer(BaseModel, AbstractParty):
 
     party_type = models.CharField(null=True, blank=True, choices=app_settings.PARTY_TYPE_CHOICES.choices)
     customer_type = models.CharField(null=True, blank=True, choices=app_settings.CUSTOMER_TYPE_CHOICES.choices)
-    customer = models.ForeignKey("self", on_delete=models.SET_NULL, null=True, blank=True)
+    customer = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="related_customer"
+    )
     dob = models.DateField(null=True, blank=True)
     user = models.ForeignKey(to=app_settings.AUTH_USER, on_delete=models.PROTECT, null=True, blank=True)
 

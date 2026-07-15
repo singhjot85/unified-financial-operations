@@ -19,6 +19,13 @@ CRM_CUSTOMER_ENTITY = "crm.CustomerEntity"
 CRM_CUSTOMER_PREFERENCE_TYPE = "crm.CustomerPreferenceType"
 CRM_CUSTOMER_PREFERENCE = "crm.CustomerPreference"
 
+APP_TENANTS = "apps.tenants"
+TENANTS_TENANT = "tenants.Tenants"
+TENANTS_DOMAIN = "tenants.Domain"
+TENANTS_CONTACT_INFO = "tenants.TenantContactInfo"
+TENANTS_CONFIGURATION = "tenants.TenantConfiguration"
+TENANTS_BRANDING = "tenants.TenantBranding"
+
 
 # ----------------------------
 #   Runtime App Classification
@@ -45,6 +52,7 @@ PUBLIC_ONLY_EXTRA_DEPENDENCIES = [
 ]
 
 PROJECT_APPS = [
+    APP_TENANTS,
     APP_CRM,
     # "apps.tenants",
     # "apps.setup",
@@ -64,7 +72,8 @@ DJANGO_TENANT_PUBLIC_APPS = [
     *PUBLIC_ONLY_EXTRA_DEPENDENCIES,
     # "apps.tenants",
     # "apps.setup",
-    APP_CORE,  # NOTE: Should always stay at last
+    APP_TENANTS,
+    # APP_CORE,  # NOTE: Should always stay at last
 ]
 
 DJANGO_TENANT_PRIVATE_APPS = [

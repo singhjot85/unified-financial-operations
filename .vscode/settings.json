@@ -13,6 +13,8 @@
     "python-envs.defaultPackageManager": "ms-python.python:pip",
     "python.defaultInterpreterPath": "/Users/gurjotsingh/Library/Caches/pypoetry/virtualenvs/unified-financial-operations-FTo2T7vf-py3.12/bin/python", // Above two should handle, if need be set this also
     "python.terminal.activateEnvironment": false, // true: makes the shell opening slow
+    "black-formatter.interpreter": ["python3"],
+
     // These are set in pyproject.toml, but still keeping them here if that breaks somehow
     "python.analysis.typeCheckingMode": "off",
     "python.analysis.extraPaths": [
