@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.db import models
 from django.http.request import HttpRequest
-from model_utils.models import (  # noqa: F401
+from model_utils.models import (
     SoftDeletableModel,
     StatusModel,
     TimeStampedModel,
@@ -13,7 +13,8 @@ from model_utils.models import (  # noqa: F401
 )
 from rest_framework.request import Request
 
-from .constants import DefaultLogStatusChoices
+from apps.core.constants import DefaultLogStatusChoices
+from apps.core.utils import safe_get_object_or_raise
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -192,6 +193,8 @@ class BaseModel(UUIDModel, TimeStampedModel, DeletionTrackingModel):
         removed_by (ForeignKey): User that deleted the instance
     """
 
+    DEFAULT_ORDERING = ("-created", "-modified", "-pk")
+
     class Meta:
         abstract = True
 
@@ -205,12 +208,9 @@ class BaseModel(UUIDModel, TimeStampedModel, DeletionTrackingModel):
             unique_filters that define's a unique object
 
         Raises:
-
+            ObjectNotFound
         """
-        return cls.available_objects.get(**unique_filters)
-
-    # @classmethod
-    # def get_objects(cls)
+        return safe_get_object_or_raise(cls, **unique_filters)
 
 
 class BaseLogModel(UUIDModel, TimeStampedModel, StatusModel):
@@ -224,6 +224,8 @@ class BaseLogModel(UUIDModel, TimeStampedModel, StatusModel):
         status (CharField): Sets a Choice(s) Based Charfield that takes choices from ``STATUS`` class attribute.
         status_changed (DateTimeField): Tacks the status change date-time.
     """
+
+    DEFAULT_ORDERING = ("-created", "-modified", "-pk")
 
     STATUS = DefaultLogStatusChoices.choices
 

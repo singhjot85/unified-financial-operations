@@ -1,8 +1,15 @@
+import logging
 import re
 import typing
 from unittest.mock import MagicMock, patch
 
 from apps.core.constants import SENSITIVE_CONTENT_PHRASES
+from apps.core.exceptions import ObjectNotFound
+
+if typing.TYPE_CHECKING:
+    from django.db import models
+
+LOGGER = logging.getLogger(__name__)
 
 
 class MockCursor:
@@ -467,16 +474,9 @@ class ContentMaskingUtils:
             if matcher.is_sensitive(value):
                 return ContentMaskingUtils.mask_value
 
-            # NOTE: This is not needed, we already have 'token', 'key', 'secret' in SENSITIVE_CONTENT_PHRASES
-            # Check if it's a token/secret (heuristic)
-            # if len(value) > 20 and any(char in value for char in ['-', '_', '.']) and ' ' not in value:
-            #     if any(phrase in value.lower() for phrase in ['token', 'key', 'secret']):
-            #         return mask_value
-
             if ContentMaskingUtils.is_valid_email(value):
                 return ContentMaskingUtils.mask_email(value)
 
-            # Mask phone numbers
             if ContentMaskingUtils.is_valid_phone(value):
                 return ContentMaskingUtils.mask_phone(value)
 
@@ -486,6 +486,29 @@ class ContentMaskingUtils:
     def filter_sensitive_content(
         stringified: bool = False, deep_search: bool = True, mask_value: str = "********", **attributes
     ) -> typing.Union[dict[str, typing.Any], str]:
+        """Filter Sensitive Content from given attributes
+
+        Args:
+            stringified (bool, optional): Output required should be stringified or plain dict.
+                Default is False
+            deep_search (bool, optional): Search Nested Dict's, List's, this take time for large data.
+                Default is True, avoid for large amount of attributes.
+            mask_value (str, optional): Mask string in place of sensitive content.
+                Default value is ``********``
+
+        Kargs:
+            attributes unpacked_dict that needs scanning, simply just unpack you'r data dict here
+
+        Usage:
+
+        ```python
+        # telematry usage
+        ContentMaskingUtils.filter_sensitive_content(stringified=True, **data)
+
+        # api responses
+        ContentMaskingUtils.filter_sensitive_content(**data)
+        ```
+        """
         matcher = get_sensitive_matcher()
 
         filtered = {}
@@ -519,3 +542,55 @@ class ContentMaskingUtils:
             return stringify_dict(filtered, flat=True)
 
         return filtered
+
+
+def get_object_or_raise(model: type[models.Model], **lookup_kwargs):
+    """Get object or raise ObjectNotFound with context"""
+    from model_utils.models import SoftDeletableModel
+
+    try:
+        if isinstance(model, SoftDeletableModel):
+            return model.available_objects.get(**lookup_kwargs)
+
+        return model.objects.get(**lookup_kwargs)
+    except model.DoesNotExist:
+        raise ObjectNotFound(model=model, **lookup_kwargs)
+
+
+def safe_get_object_or_raise(model: type["models.Model"], **lookup_kwargs):
+    """
+    Get object or raise ObjectNotFound with context
+    Safe Get the object, if multiple found log the error
+    and re-query the db for single instance based on model's ``DEFAULT_ORDERING``
+    if no such attribute found fallback to ``-pk``
+    """
+    from model_utils.models import SoftDeletableModel
+
+    try:
+        if isinstance(model, SoftDeletableModel):
+            return model.available_objects.get(**lookup_kwargs)
+
+        return model.objects.get(**lookup_kwargs)
+    except model.MultipleObjectsReturned as exc:
+        LOGGER.error(msg="Multiple Objects found for a unique dataset", exc_info=exc)
+        return (
+            filter_objects_or_raise(model, **lookup_kwargs).order_by(getattr(model, "DEFAULT_ORDERING", "-pk")).first()
+        )
+    except model.DoesNotExist:
+        raise ObjectNotFound(model=model, **lookup_kwargs)
+
+
+def filter_objects_or_raise(model: type["models.Model"], **lookup_kwargs) -> "models.QuerySet":
+    """Filter for a queryset or raise ObjectNotFound"""
+    from model_utils.models import SoftDeletableModel
+
+    qs = None
+    if isinstance(model, SoftDeletableModel):
+        qs = model.available_objects.filter(**lookup_kwargs)
+    else:
+        qs = model.objects.get(**lookup_kwargs)
+
+    if not qs:
+        raise ObjectNotFound(model, **lookup_kwargs)
+
+    return qs

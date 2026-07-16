@@ -10,7 +10,7 @@ class ObjectNotFound(Exception):
     Automatically includes model information when available.
     """
 
-    model: models.Model
+    model: "models.Model"
     message: str
 
     DEFAULT_MODEL_NAME = "Object"
@@ -32,10 +32,14 @@ class ObjectNotFound(Exception):
         return self.model.__name__
 
     def _build_message(self):
+        from apps.core.utils import ContentMaskingUtils
+
         model_name = self._get_model_name()
 
         if self.lookup_kwargs:
-            lookup_str = ", ".join(f"{k}={v}" for k, v in self.lookup_kwargs.items())
+            lookup_str = ContentMaskingUtils.filter_sensitive_content(
+                stringified=True, deep_search=True, **self.lookup_kwargs
+            )
 
             return f"{model_name} with {lookup_str} not found"
 

@@ -7,13 +7,13 @@ class DefaultLogStatusChoices(TextChoices):
 
     CREATED = "created", _("Created")
     IN_PROGRESS = "in_progress", _("In Progress")
-    SUCESS = "success", _("Sucess")
-    ERROR = "error", _("Error")
+    SUCESS = "succeded", _("Succeded")
+    FAILED = "failed", _("Failed")
 
 
 SENSITIVE_CONTENT_PHRASES = [
     "password",
-    "pass",  # This will catch password, passcode, passport, etc.
+    "pass",
     "id",
     "pk",
     "token",
