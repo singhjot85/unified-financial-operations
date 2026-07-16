@@ -161,7 +161,7 @@ class DeletionTrackingModel(SoftDeletableModel):
         return super().delete(using, *args, soft=soft, **kwargs)
 
 
-class AbstractParty:
+class AbstractParty(models.Model):
     """Abstract Helper to give common party related attributes to a model
 
     Provide Attributes:

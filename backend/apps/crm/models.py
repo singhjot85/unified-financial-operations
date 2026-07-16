@@ -84,7 +84,7 @@ class CustomerPreferenceType(BaseModel, PreferenceTypeValidatorOverride):
     additional_meta_data = models.JSONField(
         _("Additional Preferances Metadata (defaults, labels, is_multi_select)"),
         default=dict,
-        decoder=DjangoJSONEncoder,
+        encoder=DjangoJSONEncoder,
         blank=True,
     )
 
@@ -95,8 +95,8 @@ class CustomerPreferenceType(BaseModel, PreferenceTypeValidatorOverride):
         Override that instead of clean_fields directly for any custom logic.
         """
 
-        if hasattr(self, "validate_metadata", None):
-            self.additional_meta_data = getattr(self, "validate_metadata", None)()
+        if hasattr(self, "validate_metadata"):
+            self.additional_meta_data = getattr(self, "validate_metadata")()
 
         return super().clean_fields(exclude)
 
@@ -110,7 +110,7 @@ class CustomerPreference(BaseModel):
     customer = models.ForeignKey(
         Customer, null=False, blank=False, on_delete=models.PROTECT, related_name="preferences"
     )
-    value = models.JSONField(_("Preferances Value"), default=dict, decoder=DjangoJSONEncoder, blank=True)
+    value = models.JSONField(_("Preferances Value"), default=dict, encoder=DjangoJSONEncoder, blank=True)
 
     def __str__(self):
         return f"{self.preference_type} - {self.customer}"

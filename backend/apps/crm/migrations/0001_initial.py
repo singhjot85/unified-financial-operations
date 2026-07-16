@@ -39,7 +39,7 @@ class Migration(migrations.Migration):
                 'verbose_name': 'Customer',
                 'verbose_name_plural': 'Customers',
             },
-            bases=(models.Model, apps.core.models.AbstractParty),
+            bases=(apps.core.models.AbstractParty,),
         ),
         migrations.CreateModel(
             name='CustomerEmail',
@@ -103,7 +103,7 @@ class Migration(migrations.Migration):
                 ('id', model_utils.fields.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ('preference_name', models.CharField()),
                 ('data_type', models.CharField(choices=[('integer', 'Integer'), ('boolean', 'Boolean'), ('string', 'String'), ('choices', 'Choices')], max_length=124)),
-                ('additional_meta_data', models.JSONField(blank=True, decoder=django.core.serializers.json.DjangoJSONEncoder, default=dict, verbose_name='Additional Preferances Metadata (defaults, labels, is_multi_select)')),
+                ('additional_meta_data', models.JSONField(blank=True, encoder=django.core.serializers.json.DjangoJSONEncoder, default=dict, verbose_name='Additional Preferances Metadata (defaults, labels, is_multi_select)')),
                 ('removed_by', models.ForeignKey(blank=True, default=None, null=True, on_delete=django.db.models.deletion.RESTRICT, related_name='+', to=settings.AUTH_USER_MODEL)),
             ],
             options={
@@ -118,7 +118,7 @@ class Migration(migrations.Migration):
                 ('modified', model_utils.fields.AutoLastModifiedField(default=django.utils.timezone.now, editable=False, verbose_name='modified')),
                 ('is_removed', models.BooleanField(default=False)),
                 ('id', model_utils.fields.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ('value', models.JSONField(blank=True, decoder=django.core.serializers.json.DjangoJSONEncoder, default=dict, verbose_name='Preferances Value')),
+                ('value', models.JSONField(blank=True, encoder=django.core.serializers.json.DjangoJSONEncoder, default=dict, verbose_name='Preferances Value')),
                 ('customer', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='preferences', to='crm.customer')),
                 ('removed_by', models.ForeignKey(blank=True, default=None, null=True, on_delete=django.db.models.deletion.RESTRICT, related_name='+', to=settings.AUTH_USER_MODEL)),
                 ('preference_type', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to='crm.customerpreferencetype')),

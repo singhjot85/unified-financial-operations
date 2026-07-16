@@ -58,7 +58,7 @@ class CustomerEmailSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomerEmail
         fields = "__all__"
-
+        read_only_fields = ("customer",)
         list_serializer_class = CustomerEmailListSerializer
 
 
@@ -94,7 +94,7 @@ class CustomerPhoneSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomerPhone
         fields = "__all__"
-
+        read_only_fields = ("customer",)
         list_serializer_class = CustomerPhoneListSerializer
 
 
@@ -102,20 +102,23 @@ class CustomerPreferenceTypeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CustomerPreferenceType
+        fields = "__all__"
 
 
 class CustomerPreferenceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CustomerPreference
+        fields = "__all__"
+        read_only_fields = ("customer",)
 
 
 class CustomerSerializer(serializers.ModelSerializer):
 
     user = UserSerializer(read_only=True)
-    emails = CustomerEmailSerializer(source="books", many=True)
-    phones = CustomerPhoneSerializer(source="phones", many=True)
-    preferences = CustomerPreferenceSerializer(source="preferences")
+    emails = CustomerEmailSerializer(many=True, required=False)
+    phones = CustomerPhoneSerializer(many=True, required=False)
+    preferences = CustomerPreferenceSerializer(many=True, required=False)
 
     class Meta:
         model = Customer
@@ -144,6 +147,7 @@ class CustomerSerializer(serializers.ModelSerializer):
         """
         if not isinstance(value, list):
             raise serializers.ValidationError({"emails": f"Emails must be of type list not {type(value)}"})
+        return value
 
     def validate_phones(self, value):
         """
@@ -155,6 +159,7 @@ class CustomerSerializer(serializers.ModelSerializer):
         """
         if not isinstance(value, list):
             raise serializers.ValidationError({"phones": f"Phones must be of type list not {type(value)}"})
+        return value
 
     def create(self, validated_data):
         """
@@ -162,7 +167,7 @@ class CustomerSerializer(serializers.ModelSerializer):
         But we are not allowing user creation through this serializer.
         User creation for a customer, is purely business decision, so doesn't beliong here
         """
-        validated_data.pop("users", [])
+        validated_data.pop("user", None)
         emails = validated_data.pop("emails", [])
         phones = validated_data.pop("phones", [])
 
@@ -174,7 +179,7 @@ class CustomerSerializer(serializers.ModelSerializer):
         if email_ser.is_valid(raise_exception=True):
             email_ser.save()
 
-        phone_ser = CustomerEmailSerializer(data=phones, many=True, context=bulk_context)
+        phone_ser = CustomerPhoneSerializer(data=phones, many=True, context=bulk_context)
         if phone_ser.is_valid(raise_exception=True):
             phone_ser.save()
 
