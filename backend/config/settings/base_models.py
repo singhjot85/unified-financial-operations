@@ -40,8 +40,8 @@ DEFAULT_DJANGO_APPS = [
 ]
 
 SHARED_EXTRA_DEPENDENCIES = [
+    "django_tenants",
     "rest_framework",
-    # "django_tenants",
     # "rest_framework.authtoken",
     # "dj_rest_auth",
     "constance",

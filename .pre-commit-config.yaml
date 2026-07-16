@@ -34,13 +34,14 @@ repos:
   #   W503: line break before binary operator
   #   F403: import *
   #   F405: import * used and not able to resolve
+  #   E203: whitespace before ':'
   - repo: https://github.com/PyCQA/flake8
     rev: 7.2.0
     hooks:
       - id: flake8
         # additional_dependencies: [flake8-isort, flake8-print]
         additional_dependencies: [flake8-print]
-        args: ["--ignore=E501,W503,F403,F405"]
+        args: ["--ignore=E501,W503,F403,F405,E203"]
 
   # Dont think we need this, we already have isort through flake8
   # Isort from flake8 only flags and not fix import(s), figure out why it does so

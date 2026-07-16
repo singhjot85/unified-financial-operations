@@ -27,6 +27,8 @@ class Constance(BaseDescriptor):
         """Resolve Constance, i.e. __get__ for constace returns what
         For constance it try getting the constance value from DB
         """
+        constance_value = None  # default; set inside try, returned after except block
+
         try:
             constance_value = getattr(config, self.constance_key)
         except RuntimeError as tempExp:

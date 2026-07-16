@@ -14,8 +14,12 @@ class Tenants(TenantMixin, BaseModel):
     # TODO: Once we add asnc task(s) un-comment this
     #  auto_create_schema = False
 
+    label = models.CharField(max_length=255, null=True, blank=True)
     is_active = models.BooleanField(default=True, null=True, blank=True)
     public_id = models.CharField(max_length=124, null=True, blank=True)
+
+    def __str__(self):
+        return "%s - %s", self.label, self.public_id
 
     # TODO: Once we add asnc task(s) un-comment this
     # def save(self, verbosity=1, *args, **kwargs):

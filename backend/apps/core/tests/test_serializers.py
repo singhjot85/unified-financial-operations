@@ -1,3 +1,5 @@
+import typing
+
 import pytest
 from django.db import models
 from rest_framework.exceptions import MethodNotAllowed
@@ -8,8 +10,11 @@ from apps.core.serializers import (
     ReadOnlyModelSerializer,
 )
 
+if typing.TYPE_CHECKING:
+    from apps.core.utils import SQLCaptureContext
 
-class TestModel(models.Model):
+
+class SomeModel(models.Model):
     name = models.CharField(null=True, blank=True, default="Some Name")
     integer = models.IntegerField(null=True, blank=True, default=101)
     boolean = models.BooleanField(default=True, null=True, blank=True)
@@ -18,28 +23,28 @@ class TestModel(models.Model):
         app_label = "core"
 
 
-class TestReadOnlySerializer(ReadOnlyModelSerializer):
+class SomeReadOnlySerializer(ReadOnlyModelSerializer):
     class Meta:
-        model = TestModel
+        model = SomeModel
         fields = ["name", "integer", "boolean"]
 
 
-class TestDynamicReadOnlySerializer(DynamicReadOnlyModelSerializer):
+class SomeDynamicReadOnlySerializer(DynamicReadOnlyModelSerializer):
     class Meta:
-        model = TestModel
+        model = SomeModel
         fields = ["name", "integer", "boolean"]
         read_only_fields = ["integer"]
 
 
-class TestDynamicReadOnlyAllSerializer(DynamicReadOnlyModelSerializer):
+class SomeDynamicReadOnlyAllSerializer(DynamicReadOnlyModelSerializer):
     class Meta:
-        model = TestModel
+        model = SomeModel
         fields = ["name", "integer", "boolean"]
 
 
-class TestConditionalReadOnlySerializer(ConditionalReadOnlySerializer):
+class SomeConditionalReadOnlySerializer(ConditionalReadOnlySerializer):
     class Meta:
-        model = TestModel
+        model = SomeModel
         fields = ["name", "integer", "boolean"]
         read_only_fields = ["integer"]
         conditional_read_only = ["name"]
@@ -60,7 +65,7 @@ class TestReadOnlyModelSerializer:
 
     def test_readonly_marks_all_fields_readonly(self):
         data = {"name": "Some other name", "integer": 202, "boolean": False}
-        ser = TestReadOnlySerializer(data=data)
+        ser = SomeReadOnlySerializer(data=data)
         ser.is_valid(raise_exception=True)
 
         for field_name, field in ser.fields.items():
@@ -69,27 +74,27 @@ class TestReadOnlyModelSerializer:
     def test_readonly_prevents_create(self):
         data = {"name": "Some other name", "integer": 202, "boolean": False}
 
-        ser = TestReadOnlySerializer(data=data)
+        ser = SomeReadOnlySerializer(data=data)
         ser.is_valid(raise_exception=True)
 
         with pytest.raises(MethodNotAllowed):
             ser.save()
 
-    def test_readonly_prevents_update(self):
-        instance = TestModel.objects.create(name="Original Name", integer=101, boolean=True)
+    def test_readonly_prevents_update(self, mock_db_execute):
+        instance = SomeModel.objects.create(name="Original Name", integer=101, boolean=True)
 
         data = {"name": "Some other name", "integer": 202, "boolean": False}
 
-        ser = TestReadOnlySerializer(instance=instance, data=data)
+        ser = SomeReadOnlySerializer(instance=instance, data=data)
         ser.is_valid(raise_exception=True)
 
         with pytest.raises(MethodNotAllowed):
             ser.save()
 
-    def test_readonly_serializer_returns_data_correctly(self):
-        instance = TestModel.objects.create(name="Test Name", integer=303, boolean=False)
+    def test_readonly_serializer_returns_data_correctly(self, mock_db_execute):
+        instance = SomeModel.objects.create(name="Test Name", integer=303, boolean=False)
 
-        ser = TestReadOnlySerializer(instance=instance)
+        ser = SomeReadOnlySerializer(instance=instance)
 
         assert ser.data["name"] == "Test Name"
         assert ser.data["integer"] == 303
@@ -101,7 +106,7 @@ class TestDynamicReadOnlyModelSerializer:
 
     def test_dynamic_readonly_marks_specified_fields_readonly(self):
         data = {"name": "Some other name", "integer": 202, "boolean": False}
-        ser = TestDynamicReadOnlySerializer(data=data)
+        ser = SomeDynamicReadOnlySerializer(data=data)
         ser.is_valid(raise_exception=True)
 
         assert ser.fields["integer"].read_only is True
@@ -110,7 +115,7 @@ class TestDynamicReadOnlyModelSerializer:
 
     def test_dynamic_readonly_falls_back_to_all_readonly_if_no_fields_specified(self):
         data = {"name": "Some other name", "integer": 202, "boolean": False}
-        ser = TestDynamicReadOnlyAllSerializer(data=data)
+        ser = SomeDynamicReadOnlyAllSerializer(data=data)
         ser.is_valid(raise_exception=True)
 
         for field_name, field in ser.fields.items():
@@ -118,16 +123,16 @@ class TestDynamicReadOnlyModelSerializer:
 
     def test_dynamic_readonly_prevents_create(self):
         data = {"name": "Some other name", "integer": 202, "boolean": False}
-        ser = TestDynamicReadOnlySerializer(data=data)
+        ser = SomeDynamicReadOnlySerializer(data=data)
         ser.is_valid(raise_exception=True)
 
         with pytest.raises(MethodNotAllowed):
             ser.save()
 
-    def test_dynamic_readonly_prevents_update(self):
-        instance = TestModel.objects.create(name="Original Name", integer=101, boolean=True)
+    def test_dynamic_readonly_prevents_update(self, mock_db_execute):
+        instance = SomeModel.objects.create(name="Original Name", integer=101, boolean=True)
         data = {"name": "Some other name", "integer": 202, "boolean": False}
-        ser = TestDynamicReadOnlySerializer(instance=instance, data=data)
+        ser = SomeDynamicReadOnlySerializer(instance=instance, data=data)
         ser.is_valid(raise_exception=True)
 
         with pytest.raises(MethodNotAllowed):
@@ -140,7 +145,7 @@ class TestConditionalReadOnlySerializerClass:
     def test_conditional_readonly_non_staff_makes_conditional_fields_readonly(self):
         request = MockRequest(user=MockUser(is_staff=False))
         data = {"name": "Some other name", "integer": 202, "boolean": False}
-        ser = TestConditionalReadOnlySerializer(data=data, context={"request": request})
+        ser = SomeConditionalReadOnlySerializer(data=data, context={"request": request})
         ser.is_valid(raise_exception=True)
 
         # "integer" is in read_only_fields, so always read-only
@@ -153,7 +158,7 @@ class TestConditionalReadOnlySerializerClass:
     def test_conditional_readonly_staff_makes_conditional_fields_editable(self):
         request = MockRequest(user=MockUser(is_staff=True))
         data = {"name": "Some other name", "integer": 202, "boolean": False}
-        ser = TestConditionalReadOnlySerializer(data=data, context={"request": request})
+        ser = SomeConditionalReadOnlySerializer(data=data, context={"request": request})
         ser.is_valid(raise_exception=True)
 
         # "integer" is in read_only_fields, so always read-only
@@ -166,7 +171,7 @@ class TestConditionalReadOnlySerializerClass:
     def test_conditional_readonly_no_request_makes_conditional_fields_readonly(self):
         data = {"name": "Some other name", "integer": 202, "boolean": False}
         # No request in context
-        ser = TestConditionalReadOnlySerializer(data=data, context={})
+        ser = SomeConditionalReadOnlySerializer(data=data, context={})
         ser.is_valid(raise_exception=True)
 
         assert ser.fields["integer"].read_only is True
@@ -175,17 +180,25 @@ class TestConditionalReadOnlySerializerClass:
 
     def test_conditional_readonly_prevents_create(self):
         data = {"name": "Some other name", "integer": 202, "boolean": False}
-        ser = TestConditionalReadOnlySerializer(data=data)
+        ser = SomeConditionalReadOnlySerializer(data=data)
         ser.is_valid(raise_exception=True)
 
         with pytest.raises(MethodNotAllowed):
             ser.save()
 
-    def test_conditional_readonly_prevents_update(self):
-        instance = TestModel.objects.create(name="Original Name", integer=101, boolean=True)
+    def test_conditional_readonly_prevents_update(self, capture_db_queries):
+        instance = SomeModel.objects.create(name="Original Name", integer=101, boolean=True)
         data = {"name": "Some other name", "integer": 202, "boolean": False}
-        ser = TestConditionalReadOnlySerializer(instance=instance, data=data)
+        ser = SomeConditionalReadOnlySerializer(instance=instance, data=data)
         ser.is_valid(raise_exception=True)
 
         with pytest.raises(MethodNotAllowed):
-            ser.save()
+            with capture_db_queries as capture:
+                capture: SQLCaptureContext
+
+                ser.save()
+
+                assert capture.assert_no_queries()
+
+                query = capture.get_queries_by_operation(capture.OPERATION_UPDATE)
+                assert isinstance(query, list)
