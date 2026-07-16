@@ -54,3 +54,24 @@ force-exclude = """
 profile = "black"
 atomic = true
 skip_glob = ["*/migrations/*"]
+
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["test_*.py", "*_tests.py"]
+python_classes = ["Test*", "*Tests"]
+python_functions = ["test_*"]
+testpaths = ["tests", "apps.core.tests"]
+addopts = [
+    "-v",
+	"--strict-markers",
+	"--reuse-db",
+	"--import-mode=importlib",
+	"-p no:warnings",
+]
+markers = [
+    "slow: marks tests that take longer to run",
+    "integration: marks tests that hit multiple components",
+    "unit: marks tests for isolated functions",
+    "celery: marks tests that involve celery tasks",
+]

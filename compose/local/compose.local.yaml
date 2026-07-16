@@ -94,17 +94,18 @@ services:
       retries: 5
       start_period: 5s
 
-  unfo_celeryworker:
-    <<: *Django
-    command: /scripts/worker-start.sh
-    container_name: unfo_celeryworker
-    ports:
-      - "5555:5555"
-    depends_on:
-      django:
-        condition: service_started
-      unfo_broker:
-        condition: service_healthy
+  # TODO: Add Celery Configurations
+  # unfo_celeryworker:
+  #   <<: *Django
+  #   command: /scripts/worker-start.sh
+  #   container_name: unfo_celeryworker
+  #   ports:
+  #     - "5555:5555"
+  #   depends_on:
+  #     django:
+  #       condition: service_started
+  #     unfo_broker:
+  #       condition: service_healthy
 
   # unfo_celerybeat:
   #   <<: *Django
