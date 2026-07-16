@@ -178,7 +178,7 @@ class TestConditionalReadOnlySerializerClass:
         assert ser.fields["name"].read_only is True
         assert ser.fields["boolean"].read_only is False
 
-    def test_conditional_readonly_prevents_create(self):
+    def test_conditional_readonly_prevents_create(self, mock_db_execute):
         data = {"name": "Some other name", "integer": 202, "boolean": False}
         ser = SomeConditionalReadOnlySerializer(data=data)
         ser.is_valid(raise_exception=True)
@@ -186,19 +186,31 @@ class TestConditionalReadOnlySerializerClass:
         with pytest.raises(MethodNotAllowed):
             ser.save()
 
-    def test_conditional_readonly_prevents_update(self, capture_db_queries):
+    def test_conditional_readonly_prevents_update(self, mock_db_execute, capture_db_queries):
+        """
+        ``ConditionalReadOnlySerializer.save()`` must raise ``MethodNotAllowed``
+        when called with an existing instance, and must NOT issue any UPDATE
+        query to the database.
+
+        ``mock_db_execute`` is used to create the in-memory ``SomeModel``
+        instance without needing a real ``core_somemodel`` table.
+        ``capture_db_queries`` then wraps the serializer logic to assert that
+        no DB writes occur — consistent with ``MethodNotAllowed`` being raised
+        before any ORM write path is reached.
+        """
         instance = SomeModel.objects.create(name="Original Name", integer=101, boolean=True)
         data = {"name": "Some other name", "integer": 202, "boolean": False}
-        ser = SomeConditionalReadOnlySerializer(instance=instance, data=data)
-        ser.is_valid(raise_exception=True)
 
-        with pytest.raises(MethodNotAllowed):
-            with capture_db_queries as capture:
-                capture: SQLCaptureContext
+        with capture_db_queries as capture:
+            capture: SQLCaptureContext
 
+            ser = SomeConditionalReadOnlySerializer(instance=instance, data=data)
+            ser.is_valid(raise_exception=True)
+
+            with pytest.raises(MethodNotAllowed):
                 ser.save()
 
-                assert capture.assert_no_queries()
-
-                query = capture.get_queries_by_operation(capture.OPERATION_UPDATE)
-                assert isinstance(query, list)
+            # MethodNotAllowed is raised before any ORM write — no DB queries expected.
+            update_queries = capture.get_queries_by_operation(capture.OPERATION_UPDATE)
+            assert isinstance(update_queries, list)
+            assert len(update_queries) == 0

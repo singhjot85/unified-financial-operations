@@ -195,6 +195,23 @@ class BaseModel(UUIDModel, TimeStampedModel, DeletionTrackingModel):
     class Meta:
         abstract = True
 
+    @classmethod
+    def get_object(cls, **unique_filters) -> models.Model:
+        """
+        Getter to fetch database object for current class
+        It uses ``available_objects.get``, as we have ``SotDeleteModel``, this is necessary
+
+        Kwargs:
+            unique_filters that define's a unique object
+
+        Raises:
+
+        """
+        return cls.available_objects.get(**unique_filters)
+
+    # @classmethod
+    # def get_objects(cls)
+
 
 class BaseLogModel(UUIDModel, TimeStampedModel, StatusModel):
     """

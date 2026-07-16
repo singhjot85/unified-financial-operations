@@ -1,0 +1,42 @@
+import typing
+
+if typing.TYPE_CHECKING:
+    from django.db import models
+
+
+class ObjectNotFound(Exception):
+    """
+    Raised when an object is not found in the database.
+    Automatically includes model information when available.
+    """
+
+    model: models.Model
+    message: str
+
+    DEFAULT_MODEL_NAME = "Object"
+
+    def __init__(self, model=None, message=None, *args, **lookup_kwargs):
+        self.model = model
+        self.lookup_kwargs = lookup_kwargs
+
+        super().__init__(message)
+
+    def _get_model_name(self):
+
+        if not self.model:
+            return self.DEFAULT_MODEL_NAME
+
+        if hasattr(self.model, "_meta"):
+            return self.model._meta.verbose_name.title()
+
+        return self.model.__name__
+
+    def _build_message(self):
+        model_name = self._get_model_name()
+
+        if self.lookup_kwargs:
+            lookup_str = ", ".join(f"{k}={v}" for k, v in self.lookup_kwargs.items())
+
+            return f"{model_name} with {lookup_str} not found"
+
+        return f"{model_name} not found"

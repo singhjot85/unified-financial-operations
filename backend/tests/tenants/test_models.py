@@ -18,7 +18,7 @@ def test_database_setup():
             connection.schema_name == get_public_schema_name()
         ), "Public Schema not created, verify test databse setup."
 
-        private_tenant_qs = Tenants.objects.filter(schema_name=settings.TENANT_SCHEMA_NAME)
+        private_tenant_qs = Tenants.available_objects.filter(schema_name=settings.TENANT_SCHEMA_NAME)
         assert private_tenant_qs.exists(), "Private Schema not created, verify test databse setup."
 
 

@@ -72,6 +72,7 @@ addopts = [
     "--strict-markers",        # fail if an undeclared marker is used
     "--reuse-db",              # reuse DB between runs for speed
     "--import-mode=importlib", # prevents name-collision issues across test files
+    "-p no:warnings",          # Avoid Log Spamming with warnings
 ]
 markers = [
     "slow: marks tests that take longer to run",
