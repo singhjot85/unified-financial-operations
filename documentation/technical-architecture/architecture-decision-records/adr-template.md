@@ -1,6 +1,6 @@
 # ADR-<NNNN>: <Decision Title>
 
-> Location: `documentation/technical-architecture/adr/NNNN-<slug>.md` <br/>
+> Location: `documentation/technical-architecture/architecture-decision-records/NNNN-<slug>.md` <br/>
 > Status: `Proposed | Accepted | Superseded by ADR-XXXX | Deprecated` <br/>
 > Date: <date> <br/>
 > Deciders: <name(s)> <br/>

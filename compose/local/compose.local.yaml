@@ -20,10 +20,10 @@ services:
       - ./backend/.env
       - ./database/.env
     depends_on:
-      # postgres:
-      #   condition: service_healthy
+      postgres:
+        condition: service_healthy
       unfo_cache:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ../../backend:/backend
       - ../../compose/local/backend/scripts:/scripts
@@ -56,20 +56,22 @@ services:
       timeout: 30s
       retries: 5
 
-  frontend:
-    build:
-      context: ../../
-      dockerfile: compose/local/frontend/Dockerfile
-    container_name: unfo_frontend
-    restart: unless-stopped
-    volumes:
-      - ../../frontend:/frontend
-      # - ../../frontend/node_modules:/frontend/node_modules
-      - ../../compose/local/frontend/scripts:/scripts
-    ports:
-      - "5173:5173"
-    env_file:
-      - ./frontend/.env
+  # TODO: Think of a better way to containerize this,
+  # or should we skip frontend containerization, they already ship stable dev-server's
+  # frontend:
+  #   build:
+  #     context: ../../
+  #     dockerfile: compose/local/frontend/Dockerfile
+  #   container_name: unfo_frontend
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ../../frontend:/frontend
+  #     # - ../../frontend/node_modules:/frontend/node_modules
+  #     - ../../compose/local/frontend/scripts:/scripts
+  #   ports:
+  #     - "5173:5173"
+  #   env_file:
+  #     - ./frontend/.env
 
   unfo_cache:
     image: valkey/valkey:8.1.5-alpine
@@ -77,6 +79,12 @@ services:
     container_name: unfo_valkey_cache
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-p", "6379", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   unfo_broker:
     image: valkey/valkey:8.1.5-alpine
@@ -92,17 +100,18 @@ services:
       retries: 5
       start_period: 5s
 
-  unfo_celeryworker:
-    <<: *Django
-    command: /scripts/worker-start.sh
-    container_name: unfo_celeryworker
-    ports:
-      - "5555:5555"
-    depends_on:
-      django:
-        condition: service_started
-      unfo_broker:
-        condition: service_healthy
+  # TODO: Add Celery Configurations
+  # unfo_celeryworker:
+  #   <<: *Django
+  #   command: /scripts/worker-start.sh
+  #   container_name: unfo_celeryworker
+  #   ports:
+  #     - "5555:5555"
+  #   depends_on:
+  #     django:
+  #       condition: service_started
+  #     unfo_broker:
+  #       condition: service_healthy
 
   # unfo_celerybeat:
   #   <<: *Django

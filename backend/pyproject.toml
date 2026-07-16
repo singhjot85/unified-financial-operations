@@ -54,3 +54,29 @@ force-exclude = """
 profile = "black"
 atomic = true
 skip_glob = ["*/migrations/*"]
+
+
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["test_*.py", "*_tests.py"]
+python_classes = ["Test*", "*Tests"]
+python_functions = ["test_*"]
+testpaths = [
+    "tests",
+    "apps/core/tests",  # filesystem path — NOT dotted module notation
+]
+addopts = [
+    "-v",                      # show each test name + PASSED/FAILED
+    "--tb=short",              # short traceback on failures (readable, not noisy)
+    "--strict-markers",        # fail if an undeclared marker is used
+    "--reuse-db",              # reuse DB between runs for speed
+    "--import-mode=importlib", # prevents name-collision issues across test files
+    "-p no:warnings",          # Avoid Log Spamming with warnings
+]
+markers = [
+    "slow: marks tests that take longer to run",
+    "integration: marks tests that hit multiple components",
+    "unit: marks tests for isolated functions",
+    "celery: marks tests that involve celery tasks",
+]

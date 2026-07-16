@@ -5,28 +5,26 @@ this keep the settings.py file clean, and helps lazy importing models.
 
 # ----------------------------
 #   Model and App Naming
+# Naming Convention:
+#   APPS: APP_<app_name>,
+#   MODELS: <app_name>_<model_name>
 # ----------------------------
-APP_CUSTOMERS = "apps.customer_management"
-CUSTOMER_CUSTOMER = "customer_management.Customer"
-CUSTOMER_ADDRESS = "customer_management.CustomerAddress"
+APP_CORE = "apps.core"
 
-APP_NOTIFICATIONS = "apps.notifications"
-NOTIFICATION_TEMPLATE = "notifications.NotificationTemplate"
-NOTIFICATION_LOGS = "notifications.NotificationLog"
-NOTIFICATION_PREFERENCES = "notifications.NotificationPreferences"
-
-APP_PAYMENTS = "apps.payments_management"
-PAYMENT_INVOICE = "payments_management.Invoice"
-PAYMENT_TEMPLATES = "payments_management.Templates"
-PAYMENT_PAYMENTS = "payments_management.Payment"
-
-APP_SETUP = "apps.setup"
-SETUP_CONFIGURATION = "setup.Configurations"
+APP_CRM = "apps.crm"
+CRM_CUSTOMER = "crm.Customer"
+CRM_CUSTOMER_EMAIL = "crm.CustomerEmail"
+CRM_CUSTOMER_PHONE = "crm.CustomerPhone"
+CRM_CUSTOMER_ENTITY = "crm.CustomerEntity"
+CRM_CUSTOMER_PREFERENCE_TYPE = "crm.CustomerPreferenceType"
+CRM_CUSTOMER_PREFERENCE = "crm.CustomerPreference"
 
 APP_TENANTS = "apps.tenants"
-TENANTS_ORGANIZATION_TENANT = "tenants.OrganizationTenant"
-TENANTS_ORGANIZATION_DOMAIN = "tenants.OrganizationDomain"
-TENANTS_ORGANIZATION_BRANDING = "tenants.OrganizationBranding"
+TENANTS_TENANT = "tenants.Tenants"
+TENANTS_DOMAIN = "tenants.Domain"
+TENANTS_CONTACT_INFO = "tenants.TenantContactInfo"
+TENANTS_CONFIGURATION = "tenants.TenantConfiguration"
+TENANTS_BRANDING = "tenants.TenantBranding"
 
 
 # ----------------------------
@@ -42,8 +40,8 @@ DEFAULT_DJANGO_APPS = [
 ]
 
 SHARED_EXTRA_DEPENDENCIES = [
+    "django_tenants",
     "rest_framework",
-    # "django_tenants",
     # "rest_framework.authtoken",
     # "dj_rest_auth",
     "constance",
@@ -54,11 +52,14 @@ PUBLIC_ONLY_EXTRA_DEPENDENCIES = [
 ]
 
 PROJECT_APPS = [
+    APP_TENANTS,
+    APP_CRM,
     # "apps.tenants",
     # "apps.setup",
     # "apps.customer_management",
     # "apps.payments_management",
     # "apps.notifications",
+    APP_CORE,  # NOTE: Should always stay at last
 ]
 
 
@@ -71,11 +72,14 @@ DJANGO_TENANT_PUBLIC_APPS = [
     *PUBLIC_ONLY_EXTRA_DEPENDENCIES,
     # "apps.tenants",
     # "apps.setup",
+    APP_TENANTS,
+    # APP_CORE,  # NOTE: Should always stay at last
 ]
 
 DJANGO_TENANT_PRIVATE_APPS = [
     *DEFAULT_DJANGO_APPS,
     *SHARED_EXTRA_DEPENDENCIES,
+    APP_CRM,
     # "apps.customer_management",
     # "apps.payments_management",
     # "apps.setup",
