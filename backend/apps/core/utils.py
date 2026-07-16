@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import re
 import typing
@@ -10,6 +12,9 @@ if typing.TYPE_CHECKING:
     from django.db import models
 
 LOGGER = logging.getLogger(__name__)
+
+# Global singleton for the sensitive content matcher (lazy-initialised).
+_SENSITIVE_MATCHER: "PatternMatcher | None" = None
 
 
 class MockCursor:

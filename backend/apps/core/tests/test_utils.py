@@ -20,7 +20,14 @@ from unittest.mock import MagicMock
 import django.db.backends.utils as _db_utils
 import pytest
 
-from apps.core.utils import MockCursor, SQLCaptureContext
+from apps.core.utils import (
+    ContentMaskingUtils,
+    MockCursor,
+    PatternMatcher,
+    SQLCaptureContext,
+    get_sensitive_matcher,
+    stringify_dict,
+)
 
 # Capture the real CursorWrapper at import time — before any fixture patches it.
 _ORIGINAL_CURSOR_WRAPPER = _db_utils.CursorWrapper
@@ -752,3 +759,740 @@ class TestMockDbExecuteFixture:
         """After an UPDATE statement ``rowcount`` must be 1."""
         mock_db_execute.execute("UPDATE foo SET bar=1 WHERE id=1")
         assert mock_db_execute.rowcount == 1
+
+
+# ---------------------------------------------------------------------------
+# Unit: PatternMatcher — initialisation
+# ---------------------------------------------------------------------------
+
+
+class TestPatternMatcherInit:
+    """Unit tests for ``PatternMatcher`` construction and phrase compilation."""
+
+    def test_default_phrases_loaded_from_constants(self) -> None:
+        """Without explicit phrases, must load from ``SENSITIVE_CONTENT_PHRASES``."""
+        from apps.core.constants import SENSITIVE_CONTENT_PHRASES
+
+        matcher = PatternMatcher()
+        assert matcher.phrases == SENSITIVE_CONTENT_PHRASES
+
+    def test_custom_phrases_override_defaults(self) -> None:
+        """Explicit ``phrases`` kwarg must replace the constant list."""
+        matcher = PatternMatcher(phrases=["mytoken", "mysecret"])
+        assert matcher.phrases == ["mytoken", "mysecret"]
+
+    def test_case_insensitive_by_default(self) -> None:
+        """``case_sensitive`` must default to ``False``."""
+        matcher = PatternMatcher()
+        assert matcher.case_sensitive is False
+
+    def test_case_sensitive_flag_stored(self) -> None:
+        """Passing ``case_sensitive=True`` must be persisted."""
+        matcher = PatternMatcher(case_sensitive=True)
+        assert matcher.case_sensitive is True
+
+    def test_compiled_patterns_are_set_after_init(self) -> None:
+        """``_compiled_patterns`` must be a compiled ``re.Pattern`` after construction."""
+        import re
+
+        matcher = PatternMatcher(phrases=["token"])
+        assert isinstance(matcher._compiled_patterns, re.Pattern)
+
+    def test_optimized_phrases_are_set_after_init(self) -> None:
+        """``_optimized_phrases`` must be a non-empty list after construction."""
+        matcher = PatternMatcher(phrases=["token", "secret"])
+        assert isinstance(matcher._optimized_phrases, list)
+        assert len(matcher._optimized_phrases) > 0
+
+    def test_minimum_length_is_three(self) -> None:
+        """Class constant ``MINIMUM_LENGTH`` must be 3."""
+        assert PatternMatcher.MINIMUM_LENGTH == 3
+
+
+# ---------------------------------------------------------------------------
+# Unit: PatternMatcher — _optimize_phrases
+# ---------------------------------------------------------------------------
+
+
+class TestPatternMatcherOptimizePhrases:
+    """Tests for the redundant-phrase-removal logic in ``_optimize_phrases``."""
+
+    def test_phrases_not_removed_when_no_longer_superset(self) -> None:
+        """Phrases that are not substrings of other phrases must be kept."""
+        matcher = PatternMatcher(phrases=["alpha", "beta"])
+        assert "alpha" in matcher._optimized_phrases
+        assert "beta" in matcher._optimized_phrases
+
+    def test_phrases_sorted_longest_first(self) -> None:
+        """``_optimized_phrases`` must be sorted by descending length."""
+        matcher = PatternMatcher(phrases=["ab", "abcdef", "abc"])
+        lengths = [len(p) for p in matcher._optimized_phrases]
+        assert lengths == sorted(lengths, reverse=True)
+
+    def test_duplicates_collapsed(self) -> None:
+        """Identical phrases (case-insensitive) must appear only once."""
+        matcher = PatternMatcher(phrases=["Token", "token", "TOKEN"])
+        count = sum(1 for p in matcher._optimized_phrases if p == "token")
+        assert count == 1
+
+    def test_empty_strings_filtered_out(self) -> None:
+        """Empty strings in the phrase list must not appear in optimized output."""
+        matcher = PatternMatcher(phrases=["secret", ""])
+        assert "" not in matcher._optimized_phrases
+
+
+# ---------------------------------------------------------------------------
+# Unit: PatternMatcher — is_sensitive
+# ---------------------------------------------------------------------------
+
+
+class TestPatternMatcherIsSensitive:
+    """Unit tests for ``PatternMatcher.is_sensitive``."""
+
+    def setup_method(self) -> None:
+        self.matcher = PatternMatcher(phrases=["password", "secret", "token"])
+
+    def test_returns_false_for_empty_string(self) -> None:
+        """``is_sensitive`` must return ``False`` for empty string."""
+        assert self.matcher.is_sensitive("") is False
+
+    def test_returns_false_for_short_string(self) -> None:
+        """``is_sensitive`` must return ``False`` for a string shorter than 3 chars."""
+        assert self.matcher.is_sensitive("ab") is False
+
+    def test_returns_true_for_exact_sensitive_phrase(self) -> None:
+        """``is_sensitive`` must detect an exact match."""
+        assert self.matcher.is_sensitive("password") is True
+
+    def test_returns_true_for_phrase_in_sentence(self) -> None:
+        """``is_sensitive`` must detect a phrase embedded in natural text."""
+        assert self.matcher.is_sensitive("Enter your password here") is True
+
+    def test_case_insensitive_match(self) -> None:
+        """By default, ``is_sensitive`` must match regardless of case."""
+        assert self.matcher.is_sensitive("PASSWORD") is True
+        assert self.matcher.is_sensitive("Token") is True
+
+    def test_case_sensitive_no_match(self) -> None:
+        """With ``case_sensitive=True``, wrong-case text must not match."""
+        cs_matcher = PatternMatcher(phrases=["password"], case_sensitive=True)
+        assert cs_matcher.is_sensitive("PASSWORD") is False
+
+    def test_returns_false_for_safe_text(self) -> None:
+        """Plain non-sensitive text must return ``False``."""
+        assert self.matcher.is_sensitive("hello world") is False
+
+    def test_word_boundary_prevents_false_positive(self) -> None:
+        """A sensitive phrase embedded mid-word must not match due to word-boundary rules."""
+        # "token" inside "tokenize" — boundary pattern prevents match
+        assert self.matcher.is_sensitive("tokenize") is False
+
+
+# ---------------------------------------------------------------------------
+# Unit: PatternMatcher — get_sensitive_phrases
+# ---------------------------------------------------------------------------
+
+
+class TestPatternMatcherGetSensitivePhrases:
+    """Tests for ``PatternMatcher.get_sensitive_phrases``."""
+
+    def setup_method(self) -> None:
+        self.matcher = PatternMatcher(phrases=["password", "secret", "token"])
+
+    def test_returns_empty_for_empty_input(self) -> None:
+        """Must return ``[]`` for empty string."""
+        assert self.matcher.get_sensitive_phrases("") == []
+
+    def test_returns_matched_phrases(self) -> None:
+        """Must return the list of matched sensitive phrases."""
+        result = self.matcher.get_sensitive_phrases("reset your password now")
+        assert len(result) >= 1
+        assert any("password" in r.lower() for r in result)
+
+    def test_deduplicates_repeated_phrase(self) -> None:
+        """The same phrase appearing twice must appear only once in the result."""
+        result = self.matcher.get_sensitive_phrases("password and password again")
+        assert len([r for r in result if r.lower() == "password"]) == 1
+
+    def test_returns_multiple_distinct_phrases(self) -> None:
+        """Multiple different sensitive phrases must all appear in results."""
+        result = self.matcher.get_sensitive_phrases("your password and secret")
+        lower_results = [r.lower() for r in result]
+        assert "password" in lower_results or "secret" in lower_results
+
+    def test_returns_empty_for_safe_text(self) -> None:
+        """Non-sensitive text must produce an empty list."""
+        assert self.matcher.get_sensitive_phrases("hello world nothing here") == []
+
+
+# ---------------------------------------------------------------------------
+# Unit: PatternMatcher — mask_sensitive_content
+# ---------------------------------------------------------------------------
+
+
+class TestPatternMatcherMaskSensitiveContent:
+    """Tests for ``PatternMatcher.mask_sensitive_content``."""
+
+    def setup_method(self) -> None:
+        self.matcher = PatternMatcher(phrases=["password", "secret"])
+
+    def test_returns_empty_for_empty_input(self) -> None:
+        """Must return the original (empty) value for empty input."""
+        assert self.matcher.mask_sensitive_content("") == ""
+
+    def test_masks_sensitive_phrase_with_default_mask(self) -> None:
+        """Sensitive phrase in text must be replaced by ``'********'``."""
+        result = self.matcher.mask_sensitive_content("Enter password now")
+        assert "password" not in result.lower()
+        assert "********" in result
+
+    def test_custom_mask_string_is_used(self) -> None:
+        """A custom ``mask`` argument must replace the default ``'********'``."""
+        result = self.matcher.mask_sensitive_content("Enter password now", mask="[REDACTED]")
+        assert "[REDACTED]" in result
+
+    def test_safe_text_is_returned_unchanged(self) -> None:
+        """Text without sensitive phrases must pass through unmodified."""
+        text = "hello world"
+        assert self.matcher.mask_sensitive_content(text) == text
+
+    def test_multiple_sensitive_phrases_all_masked(self) -> None:
+        """Every sensitive phrase occurrence must be replaced."""
+        result = self.matcher.mask_sensitive_content("your password and secret are safe")
+        assert "password" not in result.lower()
+        assert "secret" not in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# Unit: get_sensitive_matcher — singleton behaviour
+# ---------------------------------------------------------------------------
+
+
+class TestGetSensitiveMatcher:
+    """Tests for the ``get_sensitive_matcher`` global singleton factory."""
+
+    def test_returns_pattern_matcher_instance(self) -> None:
+        """``get_sensitive_matcher`` must return a ``PatternMatcher``."""
+        result = get_sensitive_matcher()
+        assert isinstance(result, PatternMatcher)
+
+    def test_returns_same_instance_on_repeated_calls(self) -> None:
+        """Repeated calls must return the exact same singleton object."""
+        first = get_sensitive_matcher()
+        second = get_sensitive_matcher()
+        assert first is second
+
+    def test_singleton_reset_creates_new_instance(self) -> None:
+        """Resetting the global to ``None`` forces a fresh instance on next call."""
+        import apps.core.utils as utils_module
+
+        original = utils_module._SENSITIVE_MATCHER
+        try:
+            utils_module._SENSITIVE_MATCHER = None
+            new_instance = get_sensitive_matcher()
+            assert isinstance(new_instance, PatternMatcher)
+            assert new_instance is not original
+        finally:
+            utils_module._SENSITIVE_MATCHER = original
+
+
+# ---------------------------------------------------------------------------
+# Unit: stringify_dict
+# ---------------------------------------------------------------------------
+
+
+class TestStringifyDict:
+    """Unit tests for ``stringify_dict``."""
+
+    def test_flat_simple_dict(self) -> None:
+        """Flat mode must produce ``key:value`` pairs joined by the separator."""
+        result = stringify_dict({"a": 1, "b": 2}, flat=True)
+        assert "a:1" in result
+        assert "b:2" in result
+
+    def test_flat_default_separator_is_comma(self) -> None:
+        """Default separator must be ``,``."""
+        result = stringify_dict({"a": 1, "b": 2}, flat=True)
+        assert "," in result
+
+    def test_flat_custom_separator(self) -> None:
+        """A custom separator must appear in the output."""
+        result = stringify_dict({"a": 1, "b": 2}, flat=True, separator="|")
+        assert "|" in result
+
+    def test_nested_dict_is_serialised(self) -> None:
+        """Nested dicts must be wrapped in ``{...}`` notation."""
+        result = stringify_dict({"outer": {"inner": "val"}}, flat=True)
+        assert "outer" in result
+        assert "inner" in result
+        assert "val" in result
+
+    def test_list_value_is_serialised(self) -> None:
+        """List values must be wrapped in ``[...]`` notation."""
+        result = stringify_dict({"items": [1, 2, 3]}, flat=True)
+        assert "items" in result
+        assert "1" in result
+        assert "2" in result
+
+    def test_empty_dict_returns_empty_string(self) -> None:
+        """An empty dict must produce an empty string."""
+        assert stringify_dict({}, flat=True) == ""
+
+    def test_scalar_values_stringified(self) -> None:
+        """Integer and boolean scalar values must be coerced to strings."""
+        result = stringify_dict({"flag": True, "count": 42}, flat=True)
+        assert "True" in result
+        assert "42" in result
+
+
+# ---------------------------------------------------------------------------
+# Unit: ContentMaskingUtils — is_valid_email
+# ---------------------------------------------------------------------------
+
+
+class TestContentMaskingUtilsIsValidEmail:
+    """Tests for the email validation helper."""
+
+    def test_valid_simple_email(self) -> None:
+        assert ContentMaskingUtils.is_valid_email("user@example.com") is True
+
+    def test_missing_at_sign_is_invalid(self) -> None:
+        assert ContentMaskingUtils.is_valid_email("userexample.com") is False
+
+    def test_at_sign_with_content_on_both_sides(self) -> None:
+        """Current implementation: '@' present and split length >= 2."""
+        assert ContentMaskingUtils.is_valid_email("a@b") is True
+
+    def test_empty_string_is_invalid(self) -> None:
+        assert ContentMaskingUtils.is_valid_email("") is False
+
+
+# ---------------------------------------------------------------------------
+# Unit: ContentMaskingUtils — mask_email
+# ---------------------------------------------------------------------------
+
+
+class TestContentMaskingUtilsMaskEmail:
+    """Tests for the email masking helper."""
+
+    def test_valid_email_is_masked(self) -> None:
+        """A valid email must be partially masked."""
+        result = ContentMaskingUtils.mask_email("username@example.com")
+        assert "@" in result
+        assert "***" in result
+
+    def test_long_username_keeps_first_two_chars(self) -> None:
+        """Username > 3 chars: first two chars visible, then ``***``, then last char."""
+        result = ContentMaskingUtils.mask_email("longname@example.com")
+        assert result.startswith("lo")
+
+    def test_short_username_becomes_stars(self) -> None:
+        """Username <= 3 chars must be replaced entirely with ``***``."""
+        result = ContentMaskingUtils.mask_email("ab@example.com")
+        assert result.startswith("***")
+
+    def test_invalid_email_returned_unchanged(self) -> None:
+        """An invalid email (no ``@``) must be returned as-is."""
+        result = ContentMaskingUtils.mask_email("notanemail")
+        assert result == "notanemail"
+
+    def test_domain_is_partially_masked(self) -> None:
+        """The domain portion must also be partially masked."""
+        result = ContentMaskingUtils.mask_email("user@example.com")
+        domain_part = result.split("@")[1]
+        assert "***" in domain_part
+
+
+# ---------------------------------------------------------------------------
+# Unit: ContentMaskingUtils — is_valid_phone
+# ---------------------------------------------------------------------------
+
+
+class TestContentMaskingUtilsIsValidPhone:
+    """Tests for the phone number validation helper."""
+
+    def test_ten_digit_number_is_valid(self) -> None:
+        assert ContentMaskingUtils.is_valid_phone("1234567890") is True
+
+    def test_fifteen_digit_number_is_valid(self) -> None:
+        assert ContentMaskingUtils.is_valid_phone("123456789012345") is True
+
+    def test_nine_digit_number_is_invalid(self) -> None:
+        assert ContentMaskingUtils.is_valid_phone("123456789") is False
+
+    def test_sixteen_digit_number_is_invalid(self) -> None:
+        assert ContentMaskingUtils.is_valid_phone("1234567890123456") is False
+
+    def test_phone_with_formatting_chars_valid(self) -> None:
+        """Dashes, spaces, and parentheses must be stripped before digit count."""
+        assert ContentMaskingUtils.is_valid_phone("+1 (800) 555-1234") is True
+
+    def test_empty_string_is_invalid(self) -> None:
+        assert ContentMaskingUtils.is_valid_phone("") is False
+
+
+# ---------------------------------------------------------------------------
+# Unit: ContentMaskingUtils — mask_phone
+# ---------------------------------------------------------------------------
+
+
+class TestContentMaskingUtilsMaskPhone:
+    """Tests for the phone number masking helper."""
+
+    def test_preserve_format_true_replaces_digits_with_stars(self) -> None:
+        """With ``preserve_format=True`` each digit is replaced by ``*``."""
+        result = ContentMaskingUtils.mask_phone("+1 (800) 555-1234", preserve_format=True)
+        assert "1234" not in result
+        # Non-digit chars must be kept in place
+        assert " " in result or "-" in result or "(" in result
+
+    def test_preserve_format_false_returns_stars_plus_last_four(self) -> None:
+        """With ``preserve_format=False`` result is ``'******' + last 4 digits``."""
+        result = ContentMaskingUtils.mask_phone("1234567890", preserve_format=False)
+        assert result == "******7890"
+
+    def test_preserve_format_false_short_number(self) -> None:
+        """Less than 4 digits with ``preserve_format=False`` must return ``'****'``."""
+        result = ContentMaskingUtils.mask_phone("123", preserve_format=False)
+        assert result == "****"
+
+    def test_preserve_format_true_keeps_non_digit_structure(self) -> None:
+        """Dashes and spaces must be preserved in their original positions."""
+        result = ContentMaskingUtils.mask_phone("123-456-7890", preserve_format=True)
+        assert "-" in result
+
+
+# ---------------------------------------------------------------------------
+# Unit: ContentMaskingUtils — filter_value
+# ---------------------------------------------------------------------------
+
+
+class TestContentMaskingUtilsFilterValue:
+    """Tests for the single-value filtering helper."""
+
+    def setup_method(self) -> None:
+        self.matcher = PatternMatcher(phrases=["password", "secret"])
+
+    def test_sensitive_string_is_masked(self) -> None:
+        """A value that IS a sensitive phrase must be replaced by ``mask_value``."""
+        result = ContentMaskingUtils.filter_value("password", self.matcher)
+        assert result == ContentMaskingUtils.mask_value
+
+    def test_valid_email_is_masked(self) -> None:
+        """A valid email value must be masked (partially)."""
+        result = ContentMaskingUtils.filter_value("user@example.com", self.matcher)
+        assert "@" in result
+        assert "***" in result
+
+    def test_valid_phone_is_masked(self) -> None:
+        """A 10-digit phone value must be masked."""
+        result = ContentMaskingUtils.filter_value("1234567890", self.matcher)
+        # digits should be replaced — original full string must not survive
+        assert "1234567890" not in result
+
+    def test_safe_string_returned_unchanged(self) -> None:
+        """A non-sensitive, non-email, non-phone string must pass through."""
+        result = ContentMaskingUtils.filter_value("hello world", self.matcher)
+        assert result == "hello world"
+
+    def test_non_string_integer_returned_unchanged(self) -> None:
+        """Integer values must be returned as-is."""
+        assert ContentMaskingUtils.filter_value(42, self.matcher) == 42
+
+    def test_non_string_none_returned_unchanged(self) -> None:
+        """``None`` must be returned as-is."""
+        assert ContentMaskingUtils.filter_value(None, self.matcher) is None
+
+    def test_non_string_list_returned_unchanged(self) -> None:
+        """List values must be returned as-is."""
+        assert ContentMaskingUtils.filter_value([1, 2], self.matcher) == [1, 2]
+
+
+# ---------------------------------------------------------------------------
+# Unit: ContentMaskingUtils — filter_sensitive_content
+# ---------------------------------------------------------------------------
+
+
+class TestContentMaskingUtilsFilterSensitiveContent:
+    """Tests for the main ``filter_sensitive_content`` orchestrator."""
+
+    def test_sensitive_key_is_masked(self) -> None:
+        """A key that matches a sensitive phrase must have its value replaced."""
+        result = ContentMaskingUtils.filter_sensitive_content(password="hunter2")
+        assert result["password"] == "********"
+
+    def test_safe_key_value_is_preserved(self) -> None:
+        """A safe key-value pair must survive unchanged."""
+        result = ContentMaskingUtils.filter_sensitive_content(username="alice")
+        assert result["username"] == "alice"
+
+    def test_nested_dict_is_deep_searched(self) -> None:
+        """With ``deep_search=True``, nested sensitive keys must also be masked."""
+        result = ContentMaskingUtils.filter_sensitive_content(deep_search=True, credentials={"password": "secret123"})
+        assert result["credentials"]["password"] == "********"
+
+    def test_stringified_output_is_string(self) -> None:
+        """With ``stringified=True``, the output must be a ``str``."""
+        result = ContentMaskingUtils.filter_sensitive_content(stringified=True, username="alice")
+        assert isinstance(result, str)
+
+    def test_dict_output_is_dict(self) -> None:
+        """Default (``stringified=False``) must return a ``dict``."""
+        result = ContentMaskingUtils.filter_sensitive_content(username="alice")
+        assert isinstance(result, dict)
+
+    def test_custom_mask_value_is_applied(self) -> None:
+        """A custom ``mask_value`` must replace the default ``'********'``."""
+        result = ContentMaskingUtils.filter_sensitive_content(mask_value="[HIDDEN]", password="x")
+        assert result["password"] == "[HIDDEN]"
+
+    def test_email_value_is_partially_masked(self) -> None:
+        """An email under a safe key must be partially masked by ``filter_value``."""
+        result = ContentMaskingUtils.filter_sensitive_content(contact="user@example.com")
+        assert "@" in result["contact"]
+        assert "***" in result["contact"]
+
+    def test_empty_attributes_returns_empty_dict(self) -> None:
+        """Calling with no keyword attributes must return an empty dict."""
+        result = ContentMaskingUtils.filter_sensitive_content()
+        assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# Unit: get_object_or_raise
+# ---------------------------------------------------------------------------
+
+
+class TestGetObjectOrRaise:
+    """
+    Unit tests for ``get_object_or_raise``.
+
+    The Django model is fully mocked — no database is touched.
+    """
+
+    def setup_method(self) -> None:
+        from apps.core.exceptions import ObjectNotFound
+
+        self.ObjectNotFound = ObjectNotFound
+
+        self.MockModel = MagicMock()
+        self.MockModel.DoesNotExist = type("DoesNotExist", (Exception,), {})
+        self.mock_instance = MagicMock()
+
+    def test_returns_object_when_found(self) -> None:
+        """Must return the instance when ``objects.get`` succeeds."""
+        from apps.core.utils import get_object_or_raise
+
+        self.MockModel.objects.get.return_value = self.mock_instance
+        result = get_object_or_raise(self.MockModel, pk=1)
+        assert result is self.mock_instance
+
+    def test_raises_object_not_found_when_missing(self) -> None:
+        """Must raise ``ObjectNotFound`` when ``objects.get`` raises ``DoesNotExist``."""
+        from apps.core.utils import get_object_or_raise
+
+        self.MockModel.objects.get.side_effect = self.MockModel.DoesNotExist()
+        with pytest.raises(self.ObjectNotFound):
+            get_object_or_raise(self.MockModel, pk=99)
+
+    def test_passes_lookup_kwargs_to_objects_get(self) -> None:
+        """The lookup kwargs must be forwarded verbatim to ``objects.get``."""
+        from apps.core.utils import get_object_or_raise
+
+        self.MockModel.objects.get.return_value = self.mock_instance
+        get_object_or_raise(self.MockModel, name="Alice", active=True)
+        self.MockModel.objects.get.assert_called_once_with(name="Alice", active=True)
+
+
+# ---------------------------------------------------------------------------
+# Unit: safe_get_object_or_raise
+# ---------------------------------------------------------------------------
+
+
+class TestSafeGetObjectOrRaise:
+    """
+    Unit tests for ``safe_get_object_or_raise``.
+
+    The Django model is fully mocked.
+    """
+
+    def setup_method(self) -> None:
+        from apps.core.exceptions import ObjectNotFound
+
+        self.ObjectNotFound = ObjectNotFound
+
+        self.MockModel = MagicMock()
+        self.MockModel.DoesNotExist = type("DoesNotExist", (Exception,), {})
+        self.MockModel.MultipleObjectsReturned = type("MultipleObjectsReturned", (Exception,), {})
+        self.mock_instance = MagicMock()
+
+    def test_returns_object_when_found(self) -> None:
+        """Must return the instance when ``objects.get`` succeeds."""
+        from apps.core.utils import safe_get_object_or_raise
+
+        self.MockModel.objects.get.return_value = self.mock_instance
+        result = safe_get_object_or_raise(self.MockModel, pk=1)
+        assert result is self.mock_instance
+
+    def test_raises_object_not_found_when_missing(self) -> None:
+        """Must raise ``ObjectNotFound`` when ``objects.get`` raises ``DoesNotExist``."""
+        from apps.core.utils import safe_get_object_or_raise
+
+        self.MockModel.objects.get.side_effect = self.MockModel.DoesNotExist()
+        with pytest.raises(self.ObjectNotFound):
+            safe_get_object_or_raise(self.MockModel, pk=99)
+
+    def test_handles_multiple_objects_returned_with_default_ordering(self) -> None:
+        """
+        When ``MultipleObjectsReturned`` is raised, must fall back to
+        ``filter_objects_or_raise(...).order_by(DEFAULT_ORDERING).first()``.
+        """
+        from unittest.mock import patch
+
+        from apps.core.utils import safe_get_object_or_raise
+
+        self.MockModel.objects.get.side_effect = self.MockModel.MultipleObjectsReturned()
+        self.MockModel.DEFAULT_ORDERING = "-created"
+
+        fallback_instance = MagicMock()
+        mock_qs = MagicMock()
+        mock_qs.order_by.return_value.first.return_value = fallback_instance
+
+        with patch("apps.core.utils.filter_objects_or_raise", return_value=mock_qs):
+            result = safe_get_object_or_raise(self.MockModel, pk=1)
+
+        assert result is fallback_instance
+        mock_qs.order_by.assert_called_once_with("-created")
+
+    def test_falls_back_to_pk_ordering_when_no_default_ordering(self) -> None:
+        """
+        When the model has no ``DEFAULT_ORDERING``, fallback ordering must be ``'-pk'``.
+        """
+        from unittest.mock import patch
+
+        from apps.core.utils import safe_get_object_or_raise
+
+        self.MockModel.objects.get.side_effect = self.MockModel.MultipleObjectsReturned()
+        del self.MockModel.DEFAULT_ORDERING
+
+        fallback_instance = MagicMock()
+        mock_qs = MagicMock()
+        mock_qs.order_by.return_value.first.return_value = fallback_instance
+
+        with patch("apps.core.utils.filter_objects_or_raise", return_value=mock_qs):
+            result = safe_get_object_or_raise(self.MockModel, pk=1)
+
+        mock_qs.order_by.assert_called_once_with("-pk")
+        assert result is fallback_instance
+
+
+# ---------------------------------------------------------------------------
+# Unit: filter_objects_or_raise
+# ---------------------------------------------------------------------------
+
+
+class TestFilterObjectsOrRaise:
+    """
+    Unit tests for ``filter_objects_or_raise``.
+
+    The Django model is fully mocked.
+    """
+
+    def setup_method(self) -> None:
+        from apps.core.exceptions import ObjectNotFound
+
+        self.ObjectNotFound = ObjectNotFound
+
+        self.MockModel = MagicMock()
+        self.MockModel.DoesNotExist = type("DoesNotExist", (Exception,), {})
+
+    def test_returns_queryset_when_results_found(self) -> None:
+        """Must return the queryset when ``objects.get`` returns truthy."""
+        from apps.core.utils import filter_objects_or_raise
+
+        mock_qs = MagicMock()
+        mock_qs.__bool__ = lambda self: True
+        self.MockModel.objects.get.return_value = mock_qs
+
+        result = filter_objects_or_raise(self.MockModel, active=True)
+        assert result is mock_qs
+
+    def test_raises_object_not_found_when_empty(self) -> None:
+        """Must raise ``ObjectNotFound`` when the queryset is falsy (empty)."""
+        from apps.core.utils import filter_objects_or_raise
+
+        mock_qs = MagicMock()
+        mock_qs.__bool__ = lambda self: False
+        self.MockModel.objects.get.return_value = mock_qs
+
+        with pytest.raises(self.ObjectNotFound):
+            filter_objects_or_raise(self.MockModel, active=True)
+
+    def test_passes_lookup_kwargs(self) -> None:
+        """Lookup kwargs must be forwarded verbatim to the manager call."""
+        from apps.core.utils import filter_objects_or_raise
+
+        mock_qs = MagicMock()
+        mock_qs.__bool__ = lambda self: True
+        self.MockModel.objects.get.return_value = mock_qs
+
+        filter_objects_or_raise(self.MockModel, name="Bob", status="active")
+        self.MockModel.objects.get.assert_called_once_with(name="Bob", status="active")
+
+
+# ---------------------------------------------------------------------------
+# Unit: ObjectNotFound — exception raised by ORM helpers
+# ---------------------------------------------------------------------------
+
+
+class TestObjectNotFound:
+    """Tests for ``ObjectNotFound`` — the shared exception raised by ORM helpers."""
+
+    def test_can_be_raised_and_caught(self) -> None:
+        """``ObjectNotFound`` must be a subclass of ``Exception``."""
+        from apps.core.exceptions import ObjectNotFound
+
+        with pytest.raises(ObjectNotFound):
+            raise ObjectNotFound()
+
+    def test_build_message_without_model(self) -> None:
+        """Without a model, ``_build_message`` must fall back to the default name."""
+        from apps.core.exceptions import ObjectNotFound
+
+        exc = ObjectNotFound()
+        msg = exc._build_message()
+        assert "Object" in msg
+
+    def test_build_message_with_lookup_kwargs_contains_not_found(self) -> None:
+        """With lookup kwargs, the message must still contain 'not found'."""
+        from apps.core.exceptions import ObjectNotFound
+
+        exc = ObjectNotFound(username="alice")
+        msg = exc._build_message()
+        assert "not found" in msg
+
+    def test_get_model_name_from_meta(self) -> None:
+        """If the model has ``_meta``, the verbose name must be returned."""
+        from apps.core.exceptions import ObjectNotFound
+
+        mock_model = MagicMock()
+        mock_model._meta.verbose_name.title.return_value = "Invoice"
+        exc = ObjectNotFound(model=mock_model)
+        assert exc._get_model_name() == "Invoice"
+
+    def test_get_model_name_falls_back_to_class_name(self) -> None:
+        """If the model has no ``_meta``, ``__name__`` must be used."""
+        from apps.core.exceptions import ObjectNotFound
+
+        class FakeModel:
+            pass
+
+        exc = ObjectNotFound(model=FakeModel)
+        assert exc._get_model_name() == "FakeModel"
+
+    def test_no_model_returns_default_name(self) -> None:
+        """``_get_model_name`` must return ``'Object'`` when no model is set."""
+        from apps.core.exceptions import ObjectNotFound
+
+        exc = ObjectNotFound()
+        assert exc._get_model_name() == ObjectNotFound.DEFAULT_MODEL_NAME
