@@ -15,7 +15,7 @@ class CRMSettings(BaseSettings):
 
     PREFERENCE_DATA_TYPE_CHOICES = DefferedImport(default="apps.crm.constants.PreferenceDataTypeChoices", help_text="")
 
-    PREFERNCE_TYPE_VALIDATOR = DefferedImport(default="apps.crm.models.PreferenceTypeValidator", help_text="")
+    PREFERNCE_TYPE_VALIDATOR = DefferedImport(default="apps.crm.validators.PreferenceTypeValidator", help_text="")
 
     AUTH_USER = DefferedImport(default="django.contrib.auth.models.User", help_text="Auth User Model")
 

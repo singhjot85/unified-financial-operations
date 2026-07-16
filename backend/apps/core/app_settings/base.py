@@ -52,11 +52,12 @@ class BaseDescriptor:
             # Class-level access returns the descriptor itself.
             # Required for introspection: the registry and validation walk descriptors, not resolved values.
             return self
+
         value = self.resolve(self.get_raw_value(instance))
 
         # TODO: Figure out a better way to do this.
-        if self.type_cast:
-            value = self.type_cast(value)
+        # if self.type_cast:
+        #     value = self.type_cast(value)
 
         return value
 
@@ -132,7 +133,7 @@ class SettingsMeta(type):
 
         return _descriptor_map
 
-    def __new__(cls, name, bases, namespace, /, **kwds):
+    def __new__(mcs, name, bases, attrs):
         """
         Oerriding ``__new__`` to return modified instance of class
 
@@ -149,12 +150,12 @@ class SettingsMeta(type):
         """
 
         # Create the class
-        cls = super().__new__(name, bases, namespace, **kwds)
+        cls = super().__new__(mcs, name, bases, attrs)
 
-        cls.override_settings_name = SettingsMeta.build_override_settings_name(name, kwds.get("meta", None))
+        cls.override_settings_name = SettingsMeta.build_override_settings_name(name, attrs.get("Meta", None))
         print("Registering App settings >>> ", cls.override_settings_name)  # noqa: T201
 
-        cls._descriptors = SettingsMeta.build_descriptor_map(**kwds)
+        cls._descriptors = SettingsMeta.build_descriptor_map(attrs)
         return cls
 
 

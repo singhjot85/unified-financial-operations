@@ -1,16 +1,17 @@
 
-# Override Values
-DEV_YAML_PATH:=../compose/local/compose.local.yaml
+# Default Values (use ?= so root Makefile overrides take effect)
+DEV_YAML_PATH?=../compose/local/compose.local.yaml
 
 # Common Variables
-YAML_PATH:=${DEV_YAML_PATH}
+YAML_PATH?=$(DEV_YAML_PATH)
 # PROJECT_NAME:=unfo
-CONTAINER:=django
-APP_NAME:=
+CONTAINER?=django
+APP_LABEL?=
+EMN?=000X_empty_migration_default_name
 
-# Common Commands
-COMPOSE_COMMAND:=docker compose -f ${YAML_PATH}
-DJANGO_CONTAINER_COMMAND:=docker compose -f ${YAML_PATH} run --rm ${CONTAINER}
+# Common Commands — use $(or ...) for Make-native variable fallback
+COMPOSE_COMMAND:=docker compose -f $(or $(YAML_PATH),$(DEV_YAML_PATH))
+DJANGO_CONTAINER_COMMAND:=docker compose -f $(or $(YAML_PATH),$(DEV_YAML_PATH)) run --rm $(CONTAINER)
 
 
 .PHONY: start-app
@@ -18,9 +19,9 @@ DJANGO_CONTAINER_COMMAND:=docker compose -f ${YAML_PATH} run --rm ${CONTAINER}
 # Develoment Targets
 # -----
 docker-start-new-app:
-	@echo "⌛ Creatiung app ${APP_NAME}...\n"
-	mkdir -p apps/${APP_NAME}
-	${DJANGO_CONTAINER_COMMAND} python manage.py startapp ${APP_NAME} apps/${APP_NAME}
+	@echo "⌛ Creatiung app ${APP_LABEL}...\n"
+	mkdir -p apps/${APP_LABEL}
+	${DJANGO_CONTAINER_COMMAND} python manage.py startapp ${APP_LABEL} apps/${APP_LABEL}
 start-app: docker-start-new-app
 
 
@@ -80,45 +81,45 @@ db-destroy: docker-destroy-database
 # -----
 
 docker-django-makemigrations:
-	@echo "⌛ Making migrations in App: ➡️[${app}]...\n"
-	@echo "⚠️ If this was not intended use command with app= flag"
-	${DJANGO_CONTAINER_CMD} python manage.py makemigrations ${app}
+	@echo "⌛ Making migrations in App: ➡️[${APP_LABEL}]...\n"
+	@echo "⚠️ If this was not intended use command with APP_LABEL= flag"
+	${DJANGO_CONTAINER_COMMAND} python manage.py makemigrations ${APP_LABEL}
 mm: docker-django-makemigrations
 
 docker-django-migrate:
 	@echo "⌛ Migrating Schema's now...\n"
-	${DJANGO_CONTAINER_CMD} python manage.py migrate
+	${DJANGO_CONTAINER_COMMAND} python manage.py migrate
 m: docker-django-migrate
 
 docker-django-makemigrations-empty:
-	@echo "⌛ Making an empty migration in App: ➡️[${app}] with Name: ➡️[${emn}]...\n"
-	@echo "⚠️ If this was not intended use command with 'app=' or 'emn=' flags"
-	${DJANGO_CONTAINER_CMD} python manage.py makemigrations --empty ${app} --name ${emn}
+	@echo "⌛ Making an empty migration in App: ➡️[${APP_LABEL}] with Name: ➡️[${EMN}]...\n"
+	@echo "⚠️ If this was not intended use command with 'APP_LABEL=' or 'emn=' flags"
+	${DJANGO_CONTAINER_COMMAND} python manage.py makemigrations --empty ${APP_LABEL} --name ${EMN}
 mme: docker-django-makemigrations-empty
 
 docker-django-bash:
 	@echo "⌛ Starting bash in Django container...\n"
-	${DJANGO_CONTAINER_CMD} bash
+	${DJANGO_CONTAINER_COMMAND} bash
 bash: docker-django-bash
 
 docker-django-shell:
 	@echo "⌛ Launching Django shell...\n"
-	${DJANGO_CONTAINER_CMD} python manage.py shell
+	${DJANGO_CONTAINER_COMMAND} python manage.py shell
 s: docker-django-shell
 
 docker-django-tenants-shell:
 	@echo "⌛ Launching django-tenants shell...\n"
-	${DJANGO_CONTAINER_CMD} python manage.py tenant_command shell
+	${DJANGO_CONTAINER_COMMAND} python manage.py tenant_command shell
 ts: docker-django-tenants-shell
 
 docker-django-shell-plus:
 	@echo "⌛ Launching Django shell-plus...\n"
-	${DJANGO_CONTAINER_CMD} python manage.py shell_plus --ipython
+	${DJANGO_CONTAINER_COMMAND} python manage.py shell_plus --ipython
 sp: docker-django-shell-plus
 
 docker-django-tenants-shell-plus:
 	@echo "⌛ Launching Django tenants shell-plus...\n"
-	${DJANGO_CONTAINER_CMD} python manage.py tenant_command shell_plus --ipython
+	${DJANGO_CONTAINER_COMMAND} python manage.py tenant_command shell_plus --ipython
 tsp: docker-django-tenants-shell-plus
 
 docker-django-tenants-shell-debug:
@@ -133,13 +134,13 @@ tsd: docker-django-tenants-shell-debug
 
 docker-dev-setup:
 	make m
-	${DJANGO_CONTAINER_CMD} python manage.py bootstrap_tenants
-	${DJANGO_CONTAINER_CMD} python manage.py bootstrap_users
+	${DJANGO_CONTAINER_COMMAND} python manage.py bootstrap_tenants
+	${DJANGO_CONTAINER_COMMAND} python manage.py bootstrap_users
 dev-setup: docker-dev-setup
 
 docker-run-seeder:
 	make m
-	${DJANGO_CONTAINER_CMD} python manage.py run_seeder
+	${DJANGO_CONTAINER_COMMAND} python manage.py run_seeder
 run-seeder: docker-run-seeder
 
 docker-db-reset-light:
@@ -173,12 +174,12 @@ clean-light-setup: docker-clean-light-setup
 # -----
 docker-test:
 	@echo "⌛ Running tests in container...\n"
-	${DJANGO_CONTAINER_CMD} pytest
+	${DJANGO_CONTAINER_COMMAND} pytest
 t: docker-test
 
 docker-test-filter:
 	@echo "⌛ Running tests in container...\n"
-	$(DJANGO_CONTAINER_CMD) pytest $(TEST_DIR) $(if $(TEST_FILTER),-k $(TEST_FILTER))
+	$(DJANGO_CONTAINER_COMMAND) pytest $(TEST_DIR) $(if $(TEST_FILTER),-k $(TEST_FILTER))
 tf: docker-test-filter
 
 docker-service-state-check:

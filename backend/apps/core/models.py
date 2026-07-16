@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.db import models
 from django.http.request import HttpRequest
-from model_utils.models import (  # noqa: F401
+from model_utils.models import (
     SoftDeletableModel,
     StatusModel,
     TimeStampedModel,
@@ -13,7 +13,8 @@ from model_utils.models import (  # noqa: F401
 )
 from rest_framework.request import Request
 
-from .constants import DefaultLogStatusChoices
+from apps.core.constants import DefaultLogStatusChoices
+from apps.core.utils import safe_get_object_or_raise
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -39,7 +40,7 @@ class SimpleVersionModelMixin(models.Model):
 
     def save(self, *args, **kwargs):
         self.resolve_version()
-        super().save(*args, **kwargs)
+        return super().save(*args, **kwargs)
 
     def validate_version(self):
         if not self.version:
@@ -72,7 +73,9 @@ class DeletionTrackingModel(SoftDeletableModel):
     """
 
     deleted_by_fName = "deleted_by"
-    removed_by = models.ForeignKey(to=User, on_delete=models.RESTRICT, null=True, blank=True, default=None)
+    removed_by = models.ForeignKey(
+        to=User, on_delete=models.RESTRICT, null=True, blank=True, default=None, related_name="+"
+    )
 
     class Meta:
         abstract = True
@@ -190,8 +193,24 @@ class BaseModel(UUIDModel, TimeStampedModel, DeletionTrackingModel):
         removed_by (ForeignKey): User that deleted the instance
     """
 
+    DEFAULT_ORDERING = ("-created", "-modified", "-pk")
+
     class Meta:
         abstract = True
+
+    @classmethod
+    def get_object(cls, **unique_filters) -> models.Model:
+        """
+        Getter to fetch database object for current class
+        It uses ``available_objects.get``, as we have ``SotDeleteModel``, this is necessary
+
+        Kwargs:
+            unique_filters that define's a unique object
+
+        Raises:
+            ObjectNotFound
+        """
+        return safe_get_object_or_raise(cls, **unique_filters)
 
 
 class BaseLogModel(UUIDModel, TimeStampedModel, StatusModel):
@@ -206,7 +225,69 @@ class BaseLogModel(UUIDModel, TimeStampedModel, StatusModel):
         status_changed (DateTimeField): Tacks the status change date-time.
     """
 
+    DEFAULT_ORDERING = ("-created", "-modified", "-pk")
+
     STATUS = DefaultLogStatusChoices.choices
+
+    class Meta:
+        abstract = True
+
+
+class BaseVersioningModel(UUIDModel, TimeStampedModel, SimpleVersionModelMixin):
+    """Base Model to be used by models with Versioning,
+
+    Attributes:
+        id (uuid): Sets the primary key for the model to a uuid field.
+        created (DateTimeField): Adds the created field that gets auto-updated on model creation.
+        modified (DateTimeField): Adds the modified field that gets auto-updated on model update(s).
+        version_major, *_minor, *_patch (IntegerField): Three integer fields
+        version (CharField): Semantic Version value.
+    """
+
+    _major = "major"
+    _minor = "minor"
+    _patch = "patch"
+
+    _bump_types = (_major, _minor, _patch)
+
+    @classmethod
+    def _get_latest_object(cls, **filters) -> models.Model:
+        """Get latest object from Database."""
+        return cls.objects.filter(**filters).order_by(cls.DEFAULT_ORDERING).first()
+
+    @classmethod
+    def get_latest_versions(cls, **filters) -> tuple[int, int, int]:
+        """Get latest versions from Database."""
+        obj = cls._get_latest_object(**filters)
+        return (
+            obj.version_major,
+            obj.version_minor,
+            obj.version_patch if obj else f"{cls.DEFAULT_VERSION[0]}.{cls.DEFAULT_VERSION[1]}.{cls.DEFAULT_VERSION[2]}",
+        )
+
+    @classmethod
+    def get_latest_version(cls, **filters) -> str:
+        """Get latest version from Database."""
+        obj = cls._get_latest_object(**filters)
+        return obj.version if obj else f"{cls.DEFAULT_VERSION[0]}.{cls.DEFAULT_VERSION[1]}.{cls.DEFAULT_VERSION[2]}"
+
+    def bump_version(self, bump_type: str):
+        """
+        TODO: Don't like this method, this could be better
+        """
+        major, minor, patch = self.version_major, self.version_minor, self.version_patch
+
+        if bump_type == self._major:
+            major += 1
+        elif bump_type == self._minor:
+            minor += 1
+        elif bump_type == self._patch:
+            patch += 1
+
+        self.version_major = major
+        self.version_minor = minor
+        self.version_patch = patch
+        self.save()
 
     class Meta:
         abstract = True
