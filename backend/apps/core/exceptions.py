@@ -44,3 +44,11 @@ class ObjectNotFound(Exception):
             return f"{model_name} with {lookup_str} not found"
 
         return f"{model_name} not found"
+
+
+class CycleError(ValueError):
+    """
+    Raised when a circular dependency or cycle is detected in a graph.
+    """
+
+    pass

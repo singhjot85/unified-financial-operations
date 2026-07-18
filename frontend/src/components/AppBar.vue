@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
-import AppButton from './AppButton.vue';
 
 interface Props {
   minimal?: boolean;

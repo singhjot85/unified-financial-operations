@@ -1,5 +1,7 @@
 import typing
 
+from apps.core.exceptions import CycleError
+
 QUEUE: typing.TypeAlias = list[typing.Any]
 
 
@@ -81,14 +83,6 @@ class Queue:
             self._start_index += 1
 
         return return_value
-
-
-class CycleError(ValueError):
-    """
-    Raised when a circular dependency or cycle is detected in a graph.
-    """
-
-    pass
 
 
 class Graph:

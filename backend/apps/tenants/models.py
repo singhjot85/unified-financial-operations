@@ -54,7 +54,7 @@ class TenantContactInfo(BaseModel):
 
     order = models.IntegerField(null=False, blank=False, default=1)
     contact_type = models.CharField(null=False, blank=False, choices=TenantContactInfoChoices.choices)
-    tenant = models.ForeignKey(Tenants, on_delete=models.PROTECT, null=False, blank=False)
+    tenant = models.ForeignKey(Tenants, on_delete=models.PROTECT, null=False, blank=False, related_name="contact_info")
     value = models.JSONField(default=dict, encoder=DjangoJSONEncoder, null=True, blank=True)
 
 
@@ -63,10 +63,8 @@ class TenantBranding(BaseModel):
     Implement this model after UI requierements, until then keeping it as abstract
     """
 
-    tenant = models.ForeignKey(Tenants, on_delete=models.PROTECT, null=False, blank=False)
-
-    class Meta:
-        abstract = True
+    tenant = models.OneToOneField(Tenants, on_delete=models.PROTECT, null=False, blank=False)
+    details = models.JSONField(default=dict, encoder=DjangoJSONEncoder, null=True, blank=True)
 
 
 class TenantConfiguration(BaseVersioningModel):
@@ -75,4 +73,7 @@ class TenantConfiguration(BaseVersioningModel):
     """
 
     name = models.CharField(max_length=124, null=False, blank=False)
+    tenant = models.ForeignKey(
+        Tenants, on_delete=models.PROTECT, null=False, blank=False, related_name="configurations"
+    )
     details = models.JSONField(default=dict, encoder=DjangoJSONEncoder, null=True, blank=True)
