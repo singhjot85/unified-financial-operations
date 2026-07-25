@@ -31,8 +31,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from django.test import override_settings
 
-from apps.core.app_settings.base import BaseDescriptor, BaseSettings, SettingsMeta
-from apps.core.app_settings.types import Constance, DefferedImport, DefferedModel
+from apps.core.app_setting.base import BaseDescriptor, BaseSettings, SettingsMeta
+from apps.core.app_setting.types import Constance, DefferedImport, DefferedModel
 
 if typing.TYPE_CHECKING:
     pass

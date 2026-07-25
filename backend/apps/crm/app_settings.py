@@ -1,5 +1,5 @@
-from apps.core.app_settings.base import BaseSettings
-from apps.core.app_settings.types import Constance, DefferedImport
+from apps.core.app_setting.base import BaseSettings
+from apps.core.app_setting.types import Constance, DefferedImport
 
 
 class CRMSettings(BaseSettings):
