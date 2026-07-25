@@ -13,7 +13,7 @@ from apps.core.utils import camel_to_snake_case
 if typing.TYPE_CHECKING:
     from django.db.models.fields.reverse_related import ManyToOneRel
 
-    from .base import BaseSeeder
+    from apps.core.seeder.base import BaseSeeder
 
 LOGGER = logging.getLogger(__name__)
 
@@ -82,19 +82,18 @@ class ObjectCreator:
         self._data = data
         # self._method = objects_method
 
-        if not all(self._model, self._data):
+        if not all([self._model, self._data]):
             raise SeederException("Invalid ObjectCreator configuration")
 
         if database:
             self._database = database
 
-        if metadata:
-            self._model_meta = metadata
+        self._model_meta = metadata
 
         self._create_relations = create_relations
         self._deep_creation = deep_creation
 
-        from .utils import BaseSeeder
+        from apps.core.seeder.base import BaseSeeder
 
         self._seeder = seeder
         if self._seeder and not isinstance(self._seeder, BaseSeeder):
@@ -131,7 +130,7 @@ class ObjectCreator:
         if (
             self._seeder
             and hasattr(self._seeder, "get_unique_fields")
-            and (unique_fields := getattr("get_unique_fields")(kls))
+            and (unique_fields := getattr(self._seeder, "get_unique_fields")(kls))
         ):
             return unique_fields
 

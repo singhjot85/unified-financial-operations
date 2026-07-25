@@ -8,7 +8,8 @@ from django_tenants.utils import schema_context
 from apps.core.constants import SeederModes
 from apps.core.datatypes import AbstractDAGBuilder
 from apps.core.exceptions import SeederException
-from apps.core.seeder import BaseSeeder, model_seeder_registry, seeder_registry
+from apps.core.seeder.base import BaseSeeder
+from apps.core.seeder.registries import model_seeder_registry, seeder_registry
 from apps.core.utils import FileHandlingMixin, camel_to_snake_case
 
 LOGGER = logging.getLogger(__name__)
@@ -34,7 +35,11 @@ class BaseRunner(AbstractDAGBuilder, FileHandlingMixin):
     _n2s_map: dict[int, type["BaseSeeder"]]
 
     def __init__(self):
-        self._seeders_to_run = [seeder for _, seeder in self.registry.registry]
+        super().__init__()
+        if self.registry and self.registry.registry:
+            self._seeders_to_run = list(self.registry.registry.values())
+        else:
+            self._seeders_to_run = []
 
         if not self._seeders_to_run:
             raise SeederException("No seeders found to run")
@@ -78,15 +83,17 @@ class BaseRunner(AbstractDAGBuilder, FileHandlingMixin):
             # Save's CPU cycle's in 99% of cases
             return possible_name
 
-        for label, seeder in self.registry.registry:
-            if seeder.__name__ == seeder.__name__:
+        for label, seeder in self.registry.registry.items():
+            if seeder == kls:
                 return label
+        return camel_to_snake_case(kls.__name__)
 
     def seeder_to_number_map(self) -> dict:
         """
         Builds a Map where each seeder is given a number, to work with DAG Builder
         """
         self._s2n_map = {}
+        self._n2s_map = {}
         for i, seeder in enumerate(self.seeders):
             self._s2n_map[self.seeder_label(seeder)] = i
             self._n2s_map[i] = seeder
@@ -96,19 +103,34 @@ class BaseRunner(AbstractDAGBuilder, FileHandlingMixin):
         Resolve Dependencies on given seeders to run and build adjaceny_list,
         Basically converts dependecies in graph,
 
-        NOTE: All logic is abstacted behind DAGBuilder, here we only add nodes
+        NOTE: All logic is abstracted behind DAGBuilder, here we only add nodes
         """
+        self.seeder_to_number_map()
+        self._first_seeder = None
         for seeder in self.seeders:
-            if hasattr(seeder, "depends_on") and seeder.depends_on:
-                for dep in seeder.depends_on:
+            seeder_meta = getattr(seeder, "_meta", None) or getattr(seeder, "Meta", None)
+            if not seeder_meta:
+                raise SeederException("Invalid Seeder")
+            depends_on = getattr(seeder_meta, "depends_on", None)
+            if not isinstance(depends_on, (list, tuple)):
+                depends_on = getattr(seeder, "depends_on", None)
+            if isinstance(depends_on, (list, tuple)):
+                for dep in depends_on:
                     self.add_node(
                         from_index=self._s2n_map[self.seeder_label(dep)],
                         to_index=self._s2n_map[self.seeder_label(seeder)],
                     )
-            elif seeder.initial:
+            is_initial = (
+                getattr(seeder_meta, "initial", False)
+                if isinstance(getattr(seeder_meta, "initial", False), bool)
+                else False
+            )
+            if not is_initial:
+                is_initial = (
+                    getattr(seeder, "initial", False) if isinstance(getattr(seeder, "initial", False), bool) else False
+                )
+            if is_initial:
                 self._first_seeder = seeder
-
-            raise SeederException("Invalid Seeder Setup")
 
     def get_sorted_seeders(self) -> list[type["BaseSeeder"]]:
         """
@@ -121,7 +143,12 @@ class BaseRunner(AbstractDAGBuilder, FileHandlingMixin):
         for index in sorted_graph:
             sorted_seeders.append(self._n2s_map[index])
 
-        return [self._first_seeder] + sorted_seeders
+        if self._first_seeder:
+            if self._first_seeder in sorted_seeders:
+                sorted_seeders.remove(self._first_seeder)
+            return [self._first_seeder] + sorted_seeders
+
+        return sorted_seeders
 
     def get_schema_name(self, Seeder: type["BaseSeeder"]) -> str:
         """
@@ -248,6 +275,8 @@ class SelectiveSeederRunner(BaseSeederRunner):
             raise SeederException("Invalid Seeder Configuration")
 
         self._seeders_to_run = seeders
+
+        return seeders
 
 
 class FixtureRunner(BaseRunner):

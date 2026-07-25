@@ -15,6 +15,7 @@ class SeederMetaProtocol(typing.Protocol):
     TENANT_TYPE_PRIVATE = "private"
 
     Model: type[models.Model]
+    depends_on: list[type[models.Model]]
     load_data: bool
 
     unique_fields: list[str]
@@ -30,6 +31,10 @@ class SeederMetaProtocol(typing.Protocol):
         """Validate Each Seeder's Meta Configuration"""
         if not isinstance(cls.Model, models.Model):
             raise SeederException("Model must be a subclass of django.db.models.Model")
+
+        if hasattr(cls, "depends_on") and cls.depends_on:
+            if not all([isinstance(k, type) and issubclass(k, models.Model) for k in cls.depends_on]):
+                raise SeederException("Dependencies should be Model classes only")
 
         if cls.deep_creation:
             cls.create_realtions = True
@@ -56,6 +61,12 @@ class BaseSeeder(SeederMixin, FileHandlingMixin):
 
     def __init_subclass__(cls):
         """Auto Register the seeders to registry"""
+        meta = getattr(cls, "Meta", None)
+        if meta:
+            depends_on = getattr(meta, "depends_on", None)
+            if isinstance(depends_on, (list, tuple)):
+                if not all([isinstance(k, type) and issubclass(k, models.Model) for k in depends_on]):
+                    raise SeederException("Dependencies should be Model classes only")
         try:
             seeder_registry.register(cls, key=camel_to_snake_case(cls.__name__))
         except Exception as e:
@@ -81,6 +92,8 @@ class BaseSeeder(SeederMixin, FileHandlingMixin):
         """
         if not isinstance(data, (list, dict)):
             raise InvalidTypeError(type=type(data), expected="list/dict")
+
+        return data
 
     def seed(self) -> list[models.Model]:
         """
@@ -135,7 +148,7 @@ class BaseSeeder(SeederMixin, FileHandlingMixin):
 
         objs = []
         for obj_data in data:
-            object_metadata = self.get_object_metadata(data)
+            object_metadata = self.get_object_metadata(obj_data)
             obj = ObjectCreator(
                 model=self._meta.Model,
                 data=obj_data,
