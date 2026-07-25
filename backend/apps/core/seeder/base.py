@@ -3,131 +3,170 @@ import typing
 from django.db import models
 from django_tenants.utils import get_public_schema_name
 
-from apps.core.constants import SeederMethod
-from apps.core.exceptions import SeederException
+from apps.core.exceptions import InvalidTypeError, SeederException
 from apps.core.seeder.registries import seeder_registry
-from apps.core.seeder.utils import ObjectCreator, SeederAutoDiscovery
+from apps.core.seeder.utils import ObjectCreator, SeederMixin
 from apps.core.utils import FileHandlingMixin, camel_to_snake_case
 
 
-class BaseSeeder(SeederAutoDiscovery, FileHandlingMixin):
+class SeederMetaProtocol(typing.Protocol):
 
     TENANT_TYPE_PUBLIC = "public"
     TENANT_TYPE_PRIVATE = "private"
 
-    # Override's set by user
-    initial: bool = False
-    dev_only: bool = True
+    Model: type[models.Model]
+    load_data: bool
 
-    model: models.Model
-    depends_on: list["BaseSeeder"]
-    unique_fields_map: dict[str, list]
+    unique_fields: list[str]
+    unique_keys_map: dict[str, list]
+
+    create_realtions: bool = False
+    deep_creation: bool = False
+
     tenant_type: str = TENANT_TYPE_PUBLIC
-
-    # Internal class variables
-    _file_name: str
-    _atomic: bool = False
-    _objects_method: str = SeederMethod.GET_OR_CREATE.value
-    _fixtures_file: str
-
-    @classmethod
-    def get_seeder_name(cls):
-        """Seeder name is the class name here"""
-        return cls.__name__
+    fixture_only: bool = False
 
     def __init_subclass__(cls):
+        """Validate Each Seeder's Meta Configuration"""
+        if not isinstance(cls.Model, models.Model):
+            raise SeederException("Model must be a subclass of django.db.models.Model")
+
+        if cls.deep_creation:
+            cls.create_realtions = True
+
+        if not isinstance(cls.unique_fields, list):
+            raise InvalidTypeError(type=type(cls.unique_fields), expected="list")
+
+    def run_validations(self):
         """
-        Auto Discover and register seeder to registry
-        Auto Discover and seed data files to class attribute
+        Runtime Validations for seeder Meta class
+        TODO:
+        - Validate Fields passed in ``unique_keys_map`` belong to the models they are mentioned under
         """
+        pass
+
+
+class BaseSeeder(SeederMixin, FileHandlingMixin):
+    _fixtures_file: str
+
+    _meta: "SeederMetaProtocol"
+    _data: typing.Union[dict, list]
+
+    fixture_only: bool
+
+    def __init_subclass__(cls):
+        """Auto Register the seeders to registry"""
         try:
-            seeder = cls.auto_discover_model_seeder()
-            seeder_registry.register(seeder, key=camel_to_snake_case(cls.__name__))
+            seeder_registry.register(cls, key=camel_to_snake_case(cls.__name__))
         except Exception as e:
             raise SeederException(f"Error registering model: {cls.__name__},in registry") from e
 
-        try:
-            cls._fixtures_file = cls.auto_discover_fixtures_directory()
-        except Exception as e:
-            raise SeederException(f"Error in fixture auto-discovery for class: {cls.__name__}") from e
-
-    def __init__(self, is_dev: bool = True):
+    def __init__(self, data: typing.Union[dict, list] = None):
         """
         Runtime validations to ensure a valid seeder is set up.
         """
-        if not is_dev and not self.dev_only:
-            raise SeederException("Invalid Seeder Configuration")
+        self._meta = getattr(self, "Meta", None)
+        if not self._meta:
+            raise SeederException("Invalid Seeder Configuration, not Meta class Configured.")
 
-        if not self.model:
-            raise SeederException(f"Model not registered for >>> {self.__class__.__name__}")
+        self.fixture_only = self._meta.fixture_only
+        self._data = data
 
-        if not self.unique_fields_map:
-            raise SeederException(f"Please define unique keys for >>> {self.__class__.__name__}")
+    def validate_data(self, data):
+        """
+        Validate the data to be passed to ``ObjectCreator``
 
-    def get_schema_name(self):
+        Raises:
+            InvalidTypeError
         """
-        Get schema name to run the seeder in
-        """
-        if self.tenant_type == self.TENANT_TYPE_PUBLIC:
-            return get_public_schema_name()
-        elif self.tenant_type == self.TENANT_TYPE_PRIVATE:
-            self.get_data.get("_meta", {})
+        if not isinstance(data, (list, dict)):
+            raise InvalidTypeError(type=type(data), expected="list/dict")
 
-        # TODO
-        return get_public_schema_name()
+    def seed(self) -> list[models.Model]:
+        """
+        Actual Seed implementaion, seeds the data in the database using ``ObjectCreator``
+        """
+        data = self.validate_data(self.load_data())
+        objects: list[models.Model] = self.create_object(data)
+        return objects
 
-    def seed(self):
+    def load_data(self) -> typing.Union[list, dict]:
         """
-        Seed data in model istance
+        Load data from the fixture file, if not provided in the constructor
+        Returns:
+            Data from the fixture file or from the constructor
+        Raises:
+            SeederException: If no data is found in the constructor or fixture file
         """
-        file = self.get_file()
-        data = self.get_data(file)
-        self.create_object(data)
+        if self._data:
+            return self._data
 
-    def get_file(self):
-        """
-        Get fixture file absolute path containing fixture data
-        """
-        return self._fixtures_file
+        if self._meta.load_data:
+            self.auto_discover_fixtures_directory()
+            return self.load_from_file(self._fixtures_file)
 
-    def get_data(self, file: str) -> typing.Union[dict, typing.Any]:
-        """
-        Get data from fixture file
-        """
-        data = self.load_from_file(file)
-        return data
+        raise SeederException("Error loading seed data.")
 
-    def create_object(self, data: dict) -> models.Model:
+    def get_object_metadata(self, data: dict) -> dict:
         """
-        Common Logic to create object under this seeder
+        Getter to fetch object metadata from fixture file
+        By deafault dumps enire metaclass attributes
 
         Args:
-            data (dict): Data for object creation
+            data (dict): Data from fixture file per object
 
         Returns:
-            model instance created and persisted in database.
+            Metadata from fixture file
         """
-        return ObjectCreator(
-            self.model,
-            data=data,
-            unique_fields=self.unique_fields_map,
-            objects_method=self._objects_method,
-            atomic=self._atomic,
-            seeder=self,
-        )
+        if meta_from_file := data.pop("_meta", None):
+            return meta_from_file
 
-    def pre_object_creation_hook(self):
-        """
-        Common hook executed before ``ObjectCreator``
-        """
+        return self._meta.__dict__
 
-    def post_object_creation_hook(self):
+    def create_object(self, data: typing.Union[dict, list]) -> list[models.Model]:
         """
-        Common hook executed after ``ObjectCreator``
+        Create Object:
+        - Arrange Data
+        - Fetch Metadata
+        - Create Object
         """
+        if isinstance(data, dict):
+            data = (data,)
 
-    # set_<field_name>
-    def set_field_name(self, model_instance: "models.Model", field_name: str, field_value: typing.Any) -> None:
+        objs = []
+        for obj_data in data:
+            object_metadata = self.get_object_metadata(data)
+            obj = ObjectCreator(
+                model=self._meta.Model,
+                data=obj_data,
+                metadata=object_metadata,
+                create_relations=self._meta.create_realtions,
+                deep_creation=self._meta.deep_creation,
+                seeder=self,
+            )
+            objs.append(obj)
+
+        return objs
+
+    def get_unique_fields(self, kls: type[models.Model]) -> list[str]:
         """
-        This is just a template method, Change field_name to you'r actuals field's name.
+        Helper for ``ObjectCreator`` to fetch unique keys for the model
+
+        Args:
+            kls (type[Model]): Class to fetch the unique keys for.
         """
+        if isinstance(kls, models.Model):
+            kls = kls.__name__
+
+        return self._meta.unique_keys_map.get(kls)
+
+    def get_schema_to_run(self) -> str:
+        """
+        Get the schema name to run the seeder, based on the tenant type
+        Returns:
+            schema name to run the seeder
+        """
+        if self._meta.tenant_type == self._meta.TENANT_TYPE_PUBLIC:
+            return get_public_schema_name()
+
+        raise SeederException("No schema configured for the seeder to run in")

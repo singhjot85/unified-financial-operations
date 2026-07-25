@@ -3,15 +3,10 @@ import logging
 import typing
 from pathlib import Path
 
-from django.db import models, transaction
+from django.db import models
 
 from apps.core import app_settings
-from apps.core.constants import SeederMethod
-from apps.core.exceptions import (
-    InvalidTypeError,
-    ObjectCreatorException,
-    SeederException,
-)
+from apps.core.exceptions import ObjectCreatorException, SeederException
 from apps.core.seeder.registries import model_seeder_registry
 from apps.core.utils import camel_to_snake_case
 
@@ -24,75 +19,103 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ObjectCreator:
-    _unique_fields_map: dict[str, list]
-    _objects_method: str
+    """
+    Object Crating Helper, to create object's without needing a helper Create's one object at a time
+    TODO: Re-implement _method, options:
+    - delete_or_create (Delete previoius object and create a new one)
+    - get_or_create (Works as ``update_or_create`` here)
+    - plain create (Make duplicate's)
 
-    _database: str
-    _model: type[models.Model]
-    _model_obj: models.Model
-    _seed_data: typing.Union[dict, dict]
+    Attributes:
+        _model (type[Model]): Class for which the object is being created.
+        _seeder (BaseSeeder): Seeder used to create the object.
+        _data (dict): Seed data for curent instance under creation.
+        _database (str): Database to create the object.
+        _create_relations (bool): Create Foreign realtions or not.
+        _model_meta (dict): Metadata (unique_fields,) for current object creation.
+        _instance (Model): Created object, presisted as ObjecrCreator's attribute during entire lifecycle.
+        _deep_creation (bool): Create Foreign relations recursively or not.
 
-    pre_creation_hook_name: str = "pre_object_creation_hook"
-    post_creation_hook_name: str = "post_object_creation_hook"
-    object_metadata: dict
+    ModelMeta Example:
+        >>> {
+            "unique_fields": ["username", "email"]
+        }
+    """
+
+    _data: dict
+    # _method: str
+    _database: str = "default"
+    _model: type["models.Model"]
+    _seeder: type["BaseSeeder"]
+    _create_relations: bool
+    _model_meta: dict[str, typing.Any]
+    _deep_creation: bool
 
     def __init__(
         self,
         model: type[models.Model],
-        data: typing.Union[dict, list],
-        unique_fields_map: list[dict] = None,
-        objects_method: str = SeederMethod.GET_OR_CREATE.value,
-        database: str = "default",
-        atomic: bool = False,
+        data: dict,
+        # objects_method: str = SeederMethod.GET_OR_CREATE.value,
+        database: str = None,
+        metadata: dict = None,
+        # atomic: bool = False,
+        create_relations: bool = False,
+        deep_creation: bool = False,
         seeder: "BaseSeeder" = None,
     ):
-
-        if not model:
-            raise ObjectCreatorException("Model is required field to create an object")
-        if not data:
-            raise ObjectCreatorException("Data is required to create an object")
-
-        data = self.validate_data(data)
-
-        self._unique_fields_map = unique_fields_map
-        # if not self._unique_fields:
-        #     raise ImproperlyConfigured("BaseObjectCreation instance doesn't have unique fields defined.")
-
-        self._objects_method = objects_method
-        self._database = database
-        self.seeder = seeder
-
-        for _data in data:
-            self._seed_data = _data
-            self.create_object(atomic)
-
-    def validate_data(self, data) -> list:
         """
-        Validate structure of provided data, and convert it to list at last
+        Object init method, valiates the input data, and sets defaults
+
+        Args:
+            model (Model): Model Class to be created.
+            data (dict): Data for the model class to be created.
+            database (str): Database to be used for object creation,
+                default is ``default``.
+            metadata (dict): Metadata for the model class to be created,
+                default is ``None``
+            create_relations (bool): Create Foreign relations or not,
+                default is ``False``.
+            seeder (BaseSeeder): Seeder used to create the object,
+                default is ``None``.
         """
+        self._model = model
+        self._data = data
+        # self._method = objects_method
 
-        if isinstance(data, dict):
-            data = [data]
+        if not all(self._model, self._data):
+            raise SeederException("Invalid ObjectCreator configuration")
 
-        if not isinstance(data, list):
-            raise InvalidTypeError(type=type(data), expected="dict/list")
+        if database:
+            self._database = database
 
-        return data
+        if metadata:
+            self._model_meta = metadata
+
+        self._create_relations = create_relations
+        self._deep_creation = deep_creation
+
+        from .utils import BaseSeeder
+
+        self._seeder = seeder
+        if self._seeder and not isinstance(self._seeder, BaseSeeder):
+            raise SeederException("Invalid seeder provided")
+
+    _instance: models.Model
 
     @property
     def seed_data(self) -> dict:
-        if not self._seed_data:
+        if not self._data:
             return {}
 
-        return self._seed_data
+        return self._data
 
     @property
     def instance(self) -> models.Model:
         """Model Object cached on ObjectCreator instace, for easier and object wide access"""
-        if not self._model_obj:
-            return self._init_obj()
+        if not self._instance:
+            return self._init_instance()
 
-        return self._model_obj
+        return self._instance
 
     def get_unique_fields(self, kls: type[models.Model]) -> list[str]:
         """
@@ -101,14 +124,20 @@ class ObjectCreator:
         Args:
             kls (type[models.Model]): Name of the class for which
         """
-        unique_fields = self.get_unique_fields_map().get(kls, [])
+        unique_fields = None
+        if self._model_meta and (unique_fields := self._model_meta.get("unique_fields")):
+            return unique_fields
 
-        if not unique_fields:
-            raise SeederException("unable to find unique fields")
+        if (
+            self._seeder
+            and hasattr(self._seeder, "get_unique_fields")
+            and (unique_fields := getattr("get_unique_fields")(kls))
+        ):
+            return unique_fields
 
-        return unique_fields
+        raise SeederException("unable to find unique fields")
 
-    def _init_obj(self) -> models.Model:
+    def _init_instance(self) -> models.Model:
         """Initialize an in-memory object
 
         Returns:
@@ -124,8 +153,11 @@ class ObjectCreator:
             return self._model()
 
         try:
-            method = getattr(self._model.objects.using(self._database), self._objects_method)
-            obj, created = method(**filters)
+            obj, created = self._model.objects.using(self._database).get_or_create(**filters)
+            # NOTE: We cannot use ``update_or_create``, as we the entire lifecycle of ObjectCreator itself is update or create
+            # ``get_or_create`` Get's a new/existing instance and we update each attribute individually.
+            # method = getattr(self._model.objects.using(self._database), self._objects_method)
+            # obj, created = method(**filters)
             if not created:
                 LOGGER.info(
                     msg=f"using existing object for model {self._model} instead of creating new, obj: {str(obj)}"
@@ -143,11 +175,10 @@ class ObjectCreator:
             field_name (str): Name of the field.
             value (Any): Data for that field from entire data object.
         """
-        from .utils import BaseSeeder
 
         setter_method_name = f"set_{field_name}"
-        if self.seeder and isinstance(self.seeder, BaseSeeder) and hasattr(self.seeder, setter_method_name):
-            return getattr(self.seeder, setter_method_name)(model_instance, field_name, field_value)
+        if self._seeder and hasattr(self._seeder, setter_method_name):
+            return getattr(self._seeder, setter_method_name)(model_instance, field_name, field_value)
 
         return setattr(model_instance, field_name, field_value)
 
@@ -158,18 +189,22 @@ class ObjectCreator:
         model_fields: list[models.Field] = self._model._meta.get_fields(include_hidden=True)
         for field in model_fields:
             # If field not in data continue to next field
-            attname = getattr(field, "attname", None)
-            if field.name not in self.seed_data and (attname is None or attname not in self.seed_data):
+            field_name = field.name or getattr(field, "attname", None)
+            if field_name not in self.seed_data:
                 continue
+
+            raw_value = self.seed_data.get(field_name, None)
 
             # Non-relation fields are set diectly
             if not field.is_relation:
-                self.set_field_attribute()
+                self.set_field_attribute(self.instance, field_name, self.seed_data.get(field_name))
+
+            if not self._create_relations:
+                continue
 
             # forawrd relation's i.e. whose .id lives in model's table, is also saved directly
             if field.many_to_one or field.one_to_one:
-                raw_value = self.seed_data.get(field.name, self.seed_data.get(attname) if attname else None)
-                self.process_foreign_relation(self.instance, (field.name or field.attname), raw_value)
+                self.process_foreign_relation(field, raw_value)
 
             # m2m fields are saved in a dict to be used later
             if field.many_to_many:
@@ -181,66 +216,86 @@ class ObjectCreator:
                 m2m_fields[field.name] = self.seed_data.get(field.name)
                 continue
 
-        self.instance.save(using=self._database)
-        self.process_m2m_fields(self.instance, m2m_fields)
-        self.process_reverse_relations(self.instance)
-        return self.instance
+        if self._create_relations:
+            self.instance.save(using=self._database)
+            self.process_m2m_fields(m2m_fields)
+            self.process_reverse_relations()
+            return self.instance
 
-    def process_foreign_relation(self, instance: models.Model, field_name: str, raw_value: typing.Any):
+    def process_foreign_relation(self, field: models.Field, raw_value: typing.Any):
         """
-        Common method to process data for all relation's
-        May it be forward, reverese, one-one, many-many
+        Process Foreign keys, and save their data to a new instance.
+
+        Args:
+            field (Field): Model ForiegnKey Field to be created
+            raw_value (Any): Value to be inserted in ForiegnKey Field.
         """
+        field_name = field.name or getattr(field, "attname", None)
         if isinstance(raw_value, models.Model):
-            return self.set_field_attribute(instance, field_name, raw_value)
+            return self.set_field_attribute(self.instance, field_name, raw_value)
 
         elif isinstance(raw_value, (dict, list)):
-            obj = ObjectCreator(model=instance.__class__, data=raw_value, unique_fields=self.get_unique_fields())
-            return self.set_field_attribute(instance, field_name, obj)
+            # obj = ObjectCreator(model=instance.__class__, data=raw_value, unique_fields=self.get_unique_fields())
+            obj = ObjectCreator(
+                model=field.related_model,
+                data=raw_value,
+                create_relations=self._deep_creation,
+                deep_creation=self._deep_creation,
+                seeder=self._seeder,
+            )
+            return self.set_field_attribute(self.instance, field_name, obj)
 
         elif isinstance(raw_value, (int, str, type(None))):
-            return self.set_field_attribute(instance, field_name, raw_value)
+            return self.set_field_attribute(self.instance, field_name, raw_value)
 
         raise ObjectCreatorException(f"Invalid value for Relation '{field_name}': {raw_value!r}")
 
-    def process_reverse_relations(self, instance: models.Model):
+    def process_reverse_relations(self):
+        """
+        Process reverse relations, and save their data to a new instance.
+        Link the reverse relation to the current instance by setting the foreign key field in the related model.
 
-        for rel in instance._meta.related_objects:
+        Raises:
+            ObjectCreatorException: If the reverse relation data is invalid.
+        """
+        for rel in self.instance._meta.related_objects:
             rel: ManyToOneRel
 
-            accessor = rel.get_accessor_name()
-            if accessor not in self.seed_data:
+            reverse_accessor_name = rel.get_accessor_name()
+            if reverse_accessor_name not in self.seed_data:
                 continue
 
-            reverse_data = self.validate_data(self.seed_data.get(accessor))
-
-            related_model = rel.related_model
-            related_field_name = rel.field.name
+            reverse_data = self.seed_data.get(reverse_accessor_name)
+            ReverseModel = rel.related_model
+            reverse_field_name = rel.field.name
 
             for item in reverse_data:
                 if isinstance(item, models.Model):
-                    # setattr(item, fk_field_name, instance)
-                    self.set_field_attribute(item, related_field_name, instance)
-                    instance.save(using=self._database)
-
+                    # NOTE: in this case we have to update the item.reverse_field_name = self.instance
+                    self.set_field_attribute(item, reverse_field_name, self.instance)
+                    self.instance.save(using=self._database)
                 elif isinstance(item, dict):
-                    item[related_field_name] = instance
-                    ObjectCreator(related_model, data=item, unique_fields=self.get_unique_fields(related_model))
-
-                    self._create_object(kls=related_model, data=item)
-
+                    item[reverse_field_name] = self.instance
+                    ObjectCreator(
+                        model=ReverseModel,
+                        data=item,
+                        create_relations=self._deep_creation,
+                        deep_creation=self._deep_creation,
+                        seeder=self._seeder,
+                    )
                 elif isinstance(item, (int, str)):
-                    obj = related_model.objects.using(self._database).get(pk=item)
-                    # setattr(obj, fk_field_name, instance)
-                    self.set_field_attribute(obj, related_field_name, instance)
+                    obj = ReverseModel.objects.using(self._database).get(pk=item)
+                    self.set_field_attribute(obj, reverse_field_name, self.instance)
                     obj.save(using=self._database)
+                else:
+                    raise SeederException(f"Invalid value for Reverese Relation '{reverse_accessor_name}': {item!r}")
 
-    def process_m2m_fields(self, instance: models.Model, m2m_data: dict):
-        """Process many-to-many fields, fetch a related manager for m2m field and attach all objects to the instance using `manager.add`
-        Attach object to instace means u create a (obj_id, instance_id) in the m2m table.
+    def process_m2m_fields(self, m2m_data: dict):
+        """Process many-to-many fields,
+        Fetch a related manager for m2m field and attach all objects to the instance using `manager.add`
+        Attach object to instace means you create a (obj_id, instance_id) in the m2m table.
 
         Args:
-            instance: (models.Model): Model object on which the m2m fields are to be attached.
             m2m_data (dict): Data for the m2m fields.
 
         Raises:
@@ -252,22 +307,26 @@ class ObjectCreator:
             if isinstance(data, (models.Model, str, int)):
                 return data
             elif isinstance(data, dict):
-                # return self._create_object(kls=field.related_model, data=data)
                 return ObjectCreator(
-                    model=field.related_model, data=data, unique_fields=self.get_unique_fields(field.related_model)
+                    model=field.related_model,
+                    data=data,
+                    create_relations=self._deep_creation,
+                    deep_creation=self._deep_creation,
+                    seeder=self._seeder,
                 )
 
             raise ObjectCreatorException(f"Invalid M2M item: {item!r}")
 
         for field_name, raw_value in m2m_data.items():
-            field: models.ManyToManyField = instance._meta.get_field(field_name)
-            manager = getattr(instance, field_name)
+            field: models.ManyToManyField = self.instance._meta.get_field(field_name)
+            ManyManager = getattr(self.instance, field_name)
 
-            manager.clear()
+            ManyManager.clear()
             if not isinstance(raw_value, (list, tuple)):
                 raw_value = (raw_value,)
 
             related_objs = []
+            # Fetch all the related many objects in a single query, rather than one at a time
             related_objs_to_fetch = []
             for item in raw_value:
                 obj = _process_single_item(field, item)
@@ -281,107 +340,36 @@ class ObjectCreator:
                 for obj in objs:
                     related_objs.append(obj)
 
-            manager.add(*related_objs)
+            ManyManager.add(*related_objs)
 
-    def get_unique_fields_map(self) -> dict:
-        """
-        Get map of unique fields for ``get_or_create``, ``update_or_create``
-        The map should contain unique fields for both model and its foreign relation
-        unique fields for foreign relation can be avoided if its not being created/seeded.
+    def create_object(self):
+        """Create Object in database"""
+        LOGGER.info(msg=f"Creating object for model {self._model} with data: {self.seed_data}")
 
-        Example:
+        if hasattr(self._seeder, "pre_object_creation_hook"):
+            getattr(self._seeder, "pre_object_creation_hook")(self.seed_data)
 
-        >>> {
-                "Users": ["username", "email"],
-                "Customer": ["email"]
-            }
-        """
-        if self._unique_fields_map:
-            return self._unique_fields_map
+        self._create_object()
 
-        return self.object_metadata.get("unique_fields_map", {})
+        if hasattr(self._seeder, "post_object_creation_hook"):
+            getattr(self._seeder, "post_object_creation_hook")(self.instance)
 
-    def pre_object_creation_hook(self):
-        """Execute any pre_hooks on seeder and then execute current logic."""
-        if self.seeder and hasattr(self.seeder, self.pre_creation_hook_name):
-            getattr(self.seeder, self.pre_creation_hook_name)()
+        LOGGER.info(msg=f"Created object for model {self._model} with data: {self.seed_data}")
 
-        # pop the _meta from object metadata
-        self.object_metadata = self.seed_data.pop("_meta", {})
-
-    def create_object(self, atomic: bool):
-        """Wrapper to execute creation lifecycle"""
-        LOGGER.debug("Starting object creation for >>> %s", self._model.__name__)
-
-        if atomic:
-            with transaction.atomic():
-                self.pre_object_creation_hook()
-                LOGGER.debug("[Atomic] pre-hook successfull for >>> %s", self._model.__name__)
-
-                self._create_object()
-                LOGGER.debug("[Atomic] object creation successfull for >>> %s", self._model.__name__)
-
-                self.post_object_creation_hook()
-                LOGGER.debug("[Atomic] post-hook successfull for >>> %s", self._model.__name__)
-        else:
-            self.pre_object_creation_hook()
-            LOGGER.debug("[Non-Atomic] pre-hook successfull for >>> %s", self._model.__name__)
-
-            self._create_object()
-            LOGGER.debug("[Non-Atomic] object creation successfull for >>> %s", self._model.__name__)
-
-            self.post_object_creation_hook()
-            LOGGER.debug("[Non-Atomic] post-hook successfull for >>> %s", self._model.__name__)
-
-    def post_object_creation_hook(self):
-        """Execute any post_seeder on seeder and then execute current logic."""
-
-        if self.seeder and hasattr(self.seeder, self.post_creation_hook_name):
-            getattr(self.seeder, self.post_creation_hook_name)()
+        return self.instance
 
 
-class SeederAutoDiscovery:
-    _global_fixture_directory: str = app_settings.GLOBAL_FIXTURE_PATH
+class SeederMixin:
+    """
+    Mixin class for Seeder, provides common methods to be used by all seeders.
+    Ex: auto-discovery of fixture file path
 
-    @classmethod
-    def get_seeder_name(cls):
-        """Getter to generate seeder's name, override in base class for custom seeder names."""
-        raise NotImplementedError("No implementation to auto-discover seeder name")
+    Attributes:
+        _fallback_path (str): Fallback path for fixtures, if not found in the app
+    """
 
-    @classmethod
-    def auto_discover_model_seeder(cls):
-        """
-        This auto-discovery routine discover's the model's fixture file path.
-
-        Expected Directory Structure:
-
-        ```
-        app_name/
-            |- models.py
-            |- fixtures/
-            |   |- seeders.py
-        ```
-        """
-        file_path = Path(inspect.getfile(cls))
-        directory = file_path.parent  # Directory containing the subclass
-        fixtures_path = directory / "fixtures"
-
-        seeder = None
-        try:
-            seeder_path = fixtures_path.glob("seeders.py")
-            seeder = seeder_path.__getattribute__(cls.get_seeder_name())
-        except AttributeError:
-            global_seeders = Path(cls._global_fixture_directory)
-            if not global_seeders.exists():
-                raise SeederException("Unable to find fixtures")
-
-            seeder_path = global_seeders.glob("seeders.py")
-            seeder = seeder_path.__getattribute__(cls.get_seeder_name())
-
-        if not seeder:
-            raise SeederException(f"No seeder found for name:{cls.get_seeder_name()}, please create one")
-
-        return seeder
+    _fallback_path: str
+    _fixtures_file: str
 
     @classmethod
     def auto_discover_fixtures_directory(cls):
@@ -404,7 +392,7 @@ class SeederAutoDiscovery:
         if fixtures_path.exists():
             return file_path.absolute()
 
-        global_fixtures = Path(cls._global_fixture_directory)
+        global_fixtures = Path(cls._fallback_path)
         if not global_fixtures.exists():
             raise SeederException("Unable to find fixtures")
 
@@ -416,11 +404,19 @@ class SeederAutoDiscovery:
         raise SeederException("Unable to find fixtures")
 
 
-class FixtureMixin(SeederAutoDiscovery):
+class FixtureMixin(SeederMixin):
+    """
+    Fixtures are extension of SeederMixin, they provide common methods to be used by all seeders that are fixture as well
+    Attributes:
+        _fallback_path (str): Fallback path for fixtures, if not found in the app
+        _fixtures_file (str): Path to the fixture file
+    """
+
+    _fallback_path: str = app_settings.GLOBAL_FIXTURE_DATA_PATH
     _fixtures_file: str
 
     @classmethod
-    def get_seeder_name(cls):
+    def seeder_name_to_search(cls):
         """Getter to generate seeder's name, override in base class for custom seeder names."""
         return f"{cls.__name__}Seeder"
 
@@ -435,3 +431,38 @@ class FixtureMixin(SeederAutoDiscovery):
             cls._fixtures_file = cls.auto_discover_fixtures_directory()
         except Exception as e:
             raise SeederException(f"Error in fixture auto-discovery for class: {cls.__name__}") from e
+
+    @classmethod
+    def auto_discover_model_seeder(cls):
+        """
+        This auto-discovery routine discover's the model's fixture file path.
+
+        Expected Directory Structure:
+
+        ```
+        app_name/
+            |- models.py
+            |- fixtures/
+            |   |- seeders.py
+        ```
+        """
+        file_path = Path(inspect.getfile(cls))
+        directory = file_path.parent  # Directory containing the subclass
+        fixtures_path = directory / "fixtures"
+
+        seeder = None
+        try:
+            seeder_path = fixtures_path.glob("seeders.py")
+            seeder = seeder_path.__getattribute__(cls.seeder_name_to_search())
+        except AttributeError:
+            global_seeders = Path(cls._fallback_path)
+            if not global_seeders.exists():
+                raise SeederException("Unable to find fixtures")
+
+            seeder_path = global_seeders.glob("seeders.py")
+            seeder = seeder_path.__getattribute__(cls.seeder_name_to_search())
+
+        if not seeder:
+            raise SeederException(f"No seeder found for name:{cls.seeder_name_to_search()}, please create one")
+
+        return seeder

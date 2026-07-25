@@ -28,8 +28,8 @@ class SeederModes(Enum):
     - Model: Run seeder's only with FixtureMixin
     """
 
-    MODEL = "model"
-    ALL = "all"
+    FIXTURE = "fixture"
+    SEEDER = "seeder"
     SINGLE = "single"
 
 
