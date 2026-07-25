@@ -52,3 +52,28 @@ class CycleError(ValueError):
     """
 
     pass
+
+
+class SeederException(Exception):
+    """General Exception raised when from seeder."""
+
+    pass
+
+
+class ObjectCreatorException(Exception):
+    """General Exception raised when creating an object."""
+
+    pass
+
+
+class InvalidTypeError(ValueError):
+
+    def __init__(self, type, expected):
+        message = f"Invalid data of type: {type}, expected: {expected}"
+        super().__init__(message)
+
+
+class RegistryException(Exception):
+    """Raise when re-registring something to registry."""
+
+    pass

@@ -6,7 +6,7 @@ from django.apps import apps
 from django.core.exceptions import AppRegistryNotReady
 from django.utils.module_loading import import_string
 
-from apps.core.app_settings.base import BaseDescriptor
+from apps.core.app_setting.base import BaseDescriptor
 
 LOGGER = logging.getLogger(__name__)
 
@@ -75,3 +75,9 @@ class DefferedImport(BaseDescriptor):
             raise e
 
         return _kls
+
+
+class RuntimeFlag(BaseDescriptor):
+
+    def resolve(self, raw_value):
+        return raw_value

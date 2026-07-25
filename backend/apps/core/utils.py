@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 import typing
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from django.conf import settings
+
 from apps.core.constants import SENSITIVE_CONTENT_PHRASES
-from apps.core.exceptions import ObjectNotFound
+from apps.core.exceptions import InvalidTypeError, ObjectNotFound
 
 if typing.TYPE_CHECKING:
     from django.db import models
@@ -599,3 +603,85 @@ def filter_objects_or_raise(model: type["models.Model"], **lookup_kwargs) -> "mo
         raise ObjectNotFound(model, **lookup_kwargs)
 
     return qs
+
+
+def camel_to_snake_case(class_name):
+    """
+    Convert CamelCase string to snake_case.
+    Handle consecutive uppercase letters (acronyms) "HTTPResponse" -> "http_response"
+
+    Args:
+        class_name (str): String in CamelCase format (e.g., "SomeClassName")
+
+    Returns:
+        str: String in snake_case format (e.g., "some_class_name")
+
+
+    NOTE: Doesn't handle cases when consecutive uppercases occur b/w string
+    Example:
+
+        >>> camel_to_snake_case("SomeClassNameNOclasURL")
+        >>> 'some_class_name_n_oclas_url'
+
+    """
+    pattern = r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
+    snake = re.sub(pattern, "_", class_name)
+    return snake.lower()
+
+
+class FileHandlingMixin:
+
+    @classmethod
+    def correct_file_path(cls, file_path: typing.Union[str, Path]) -> Path:
+        """
+        Correct file path, relative to base, root, and app directory
+        Tries all three, from wherever file is found it returns it
+
+        Args:
+            file_path (str): File path
+
+        Returns:
+            corrected file path
+
+        Raises:
+            SeederException
+        """
+        if isinstance(file_path, str):
+            file_path = Path(file_path)
+
+        if not isinstance(file_path, Path):
+            raise InvalidTypeError(type=type(file_path), expected=type(Path))
+
+        file_path
+        if file_path.exists():
+            return file_path
+
+        app_path = file_path / settings.APP_DIR
+        if app_path.exists():
+            return file_path
+
+        base_path = file_path / settings.BASE_DIR
+        if base_path.exists():
+            return base_path
+
+        raise FileNotFoundError(f"Cannot find: {file_path}")
+
+    @classmethod
+    def load_from_file(cls, file_path: typing.Union[str, Path]):
+        """
+        Load something from a file
+        """
+        if isinstance(file_path, str):
+            file_path = Path(file_path)
+
+        if not isinstance(file_path, Path):
+            raise InvalidTypeError(type=type(file_path), expected=type(Path))
+
+        if not file_path.exists() and not (file_path := cls.correct_file_path(file_path)):
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        data = file_path.read_text()
+        if file_path.suffix == "json":
+            data = json.loads(data)
+
+        return data

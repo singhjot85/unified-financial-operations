@@ -205,3 +205,9 @@ class DirectedGraph(Graph):
             raise CycleError("Graph contains a cycle / circular dependency")
 
         return topo_sort
+
+
+class AbstractDAGBuilder(DirectedGraph):
+
+    def resolve_dependencies(self):
+        raise NotImplementedError("Dependecy resolution logic not found.")

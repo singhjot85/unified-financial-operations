@@ -16,16 +16,33 @@ class BaseDescriptor:
     here so every subclass gets it for free and consistently.
     """
 
-    default: typing.Any  # Default value of the setting
-    help_text: str  # Doc string explaining the setting, later will be used in django-admin
-    type_cast: typing.Any  # Default class/protocol to type cast the setting
+    default: typing.Any
+    help_text: str
+    type_cast: typing.Any
     name: str  # Name of the settings attribute, Ex: MAX_RETRY_COUNT
     app_settings_name: str  # Name of the settings, Ex: CRMSettings
+    data_type: type  # Data type for configured setting
 
-    def __init__(self, default: typing.Any, help_text: str = "", type_cast=None, *args, **kwargs):
-        """Set Descriptor Attributes, each attribute has a different role going forward."""
+    def __init__(
+        self,
+        default: typing.Any,
+        help_text: str = "",
+        data_type: typing.Union[type, list[type]] = None,
+        *args,
+        **kwargs,
+    ):
+        """
+        Set Descriptor Attributes, each attribute has a different role going forward.
+
+        Args:
+           default (typing.Any): Default value of the setting
+           help_text (str): Doc string explaining the setting, later will be used in django-admin
+           data_type(type): Default class/protocol to type cast the setting
+
+        """
 
         self.default = default
+        self.data_type = data_type
         self.help_text = help_text
         self.default = default
 
@@ -54,10 +71,8 @@ class BaseDescriptor:
             return self
 
         value = self.resolve(self.get_raw_value(instance))
-
-        # TODO: Figure out a better way to do this.
-        # if self.type_cast:
-        #     value = self.type_cast(value)
+        if self.data_type and not isinstance(value, self.data_type):
+            raise TypeError(f"Invalid resolved data-type: {type(value)}, expected: {self.data_type}")
 
         return value
 
