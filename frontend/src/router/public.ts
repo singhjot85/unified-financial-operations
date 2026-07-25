@@ -8,6 +8,24 @@ export const publicRoutes: RouteRecordRaw[] = [
     meta: { transition: 'fade' }
   },
   {
+    path: '/login',
+    name: 'Login',
+    component: () => import('../views/LoginView.vue'),
+    meta: { transition: 'fade' }
+  },
+  {
+    path: '/signup',
+    name: 'Signup',
+    component: () => import('../views/SignupView.vue'),
+    meta: { transition: 'push' }
+  },
+  {
+    path: '/mfa',
+    name: 'MFA',
+    component: () => import('../views/MfaView.vue'),
+    meta: { transition: 'slide_up' }
+  },
+  {
     path: '/donate',
     name: 'DonationForm',
     component: () => import('../views/DonationFormView.vue'),

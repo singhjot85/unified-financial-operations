@@ -1,4 +1,4 @@
-import { type Campaign, type Donation, type Frequency } from '../types';
+import { type Campaign, type Donation, type Frequency } from '../conf/types/common';
 import { DEFAULT_CONFIG } from '../conf/defaults';
 import api from './api';
 

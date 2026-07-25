@@ -1,4 +1,4 @@
-import { type AppConfig } from '../types';
+import { type AppConfig } from './types/common';
 
 export const DEFAULT_CONFIG: AppConfig = {
   campaign: {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
 import { useDonationStore } from '../stores/donation';
-import { type DonationOption } from '../types';
+import { type DonationOption } from '../conf/types/common';
 
 const router = useRouter();
 const donationStore = useDonationStore();

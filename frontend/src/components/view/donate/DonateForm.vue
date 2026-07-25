@@ -2,8 +2,9 @@
 import { ref, watch, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useDonationStore } from '../../../stores/donation';
-import { type Frequency } from '../../../types';
-import AppButton from '../../ApwpButton.vue';
+import { type Frequency } from '../../../conf/types/common';
+import AppButton from '../../AppButton.vue';
+
 
 const route = useRoute();
 const router = useRouter();
