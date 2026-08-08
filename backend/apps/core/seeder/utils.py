@@ -406,6 +406,14 @@ class SeederMixin:
 class FixtureMixin(SeederMixin):
     """
     Fixtures are extension of SeederMixin, they provide common methods to be used by all seeders that are fixture as well
+
+    ```
+    app_name/
+        |- models.py
+        |- fixtures/
+        |   |- seeders.py
+    ```
+
     Attributes:
         _fallback_path (str): Fallback path for fixtures, if not found in the app
         _fixtures_file (str): Path to the fixture file

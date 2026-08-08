@@ -66,7 +66,7 @@ class ConcreteSettings(BaseSettings):
     SOME_FLAG = PassthroughDescriptor(default=True, help_text="A simple boolean flag")
     SOME_INT = DoubleDescriptor(default=5, help_text="An integer that gets doubled")
     IMPORT_SETTING = DefferedImport(
-        default="apps.core.app_settings.base.BaseSettings",
+        default="apps.core.app_setting.base.BaseSettings",
         help_text="A deferred import",
     )
 
@@ -303,8 +303,8 @@ class TestDefferedImportDescriptor:
 
     def test_resolve_returns_importable_class(self):
         """``DefferedImport.resolve`` must import and return the target class."""
-        descriptor = DefferedImport(default="apps.core.app_settings.base.BaseSettings")
-        result = descriptor.resolve("apps.core.app_settings.base.BaseSettings")
+        descriptor = DefferedImport(default="apps.core.app_setting.base.BaseSettings")
+        result = descriptor.resolve("apps.core.app_setting.base.BaseSettings")
         assert result is BaseSettings
 
     def test_resolve_returns_none_and_logs_on_import_error(self, caplog):
@@ -312,7 +312,7 @@ class TestDefferedImportDescriptor:
         import logging
 
         descriptor = DefferedImport(default="does.not.exist.SomeClass")
-        with caplog.at_level(logging.ERROR, logger="apps.core.app_settings.types"):
+        with caplog.at_level(logging.ERROR, logger="apps.core.app_setting.types"):
             result = descriptor.resolve("does.not.exist.SomeClass")
         assert result is None
 
@@ -327,7 +327,7 @@ class TestDefferedImportDescriptor:
         result = instance.IMPORT_SETTING
         assert result is BaseSettings
 
-    @override_settings(CONCRETESETTINGS_APP_SETTINGS={"IMPORT_SETTING": "apps.core.app_settings.base.BaseDescriptor"})
+    @override_settings(CONCRETESETTINGS_APP_SETTINGS={"IMPORT_SETTING": "apps.core.app_setting.base.BaseDescriptor"})
     def test_override_settings_redirects_import(self):
         """``override_settings`` must redirect the imported class to the overridden path."""
         instance = ConcreteSettings()
@@ -338,7 +338,7 @@ class TestDefferedImportDescriptor:
         """Non-``ImportError`` exceptions from ``import_string`` must propagate."""
         descriptor = DefferedImport(default="irrelevant")
 
-        with patch("apps.core.app_settings.types.import_string", side_effect=RuntimeError("boom")):
+        with patch("apps.core.app_setting.types.import_string", side_effect=RuntimeError("boom")):
             with pytest.raises(RuntimeError, match="boom"):
                 descriptor.resolve("any.path")
 
@@ -370,8 +370,8 @@ class TestDefferedModelDescriptor:
         from django.core.exceptions import AppRegistryNotReady
 
         descriptor = DefferedModel(default="crm.Customer")
-        with patch("apps.core.app_settings.types.apps.get_model", side_effect=AppRegistryNotReady("not ready")):
-            with caplog.at_level(logging.ERROR, logger="apps.core.app_settings.types"):
+        with patch("apps.core.app_setting.types.apps.get_model", side_effect=AppRegistryNotReady("not ready")):
+            with caplog.at_level(logging.ERROR, logger="apps.core.app_setting.types"):
                 result = descriptor.resolve("crm.Customer")
         assert result is None
 
@@ -379,7 +379,7 @@ class TestDefferedModelDescriptor:
         """Non-``AppRegistryNotReady`` exceptions from ``apps.get_model`` must propagate."""
         descriptor = DefferedModel(default="any.Model")
 
-        with patch("apps.core.app_settings.types.apps.get_model", side_effect=ValueError("unexpected")):
+        with patch("apps.core.app_setting.types.apps.get_model", side_effect=ValueError("unexpected")):
             with pytest.raises(ValueError, match="unexpected"):
                 descriptor.resolve("any.Model")
 
@@ -458,7 +458,7 @@ class TestConstanceDescriptor:
         mock_config = MagicMock()
         setattr(mock_config, descriptor.constance_key, True)
 
-        with patch("apps.core.app_settings.types.config", mock_config):
+        with patch("apps.core.app_setting.types.config", mock_config):
             instance = MySettings()
             result = instance.MY_TOGGLE
 
@@ -480,8 +480,8 @@ class TestConstanceDescriptor:
         MySettings.BAD_TOGGLE
         mock_config = MagicMock(spec=[])  # no attributes at all → AttributeError on getattr
 
-        with patch("apps.core.app_settings.types.config", mock_config):
-            with caplog.at_level(logging.ERROR, logger="apps.core.app_settings.types"):
+        with patch("apps.core.app_setting.types.config", mock_config):
+            with caplog.at_level(logging.ERROR, logger="apps.core.app_setting.types"):
                 instance = MySettings()
                 result = instance.BAD_TOGGLE
 
@@ -500,7 +500,7 @@ class TestConstanceDescriptor:
 
         # getattr(config, constance_key) path — patch getattr to raise RuntimeError
         with patch(
-            "apps.core.app_settings.types.getattr",
+            "apps.core.app_setting.types.getattr",
             side_effect=RuntimeError("descriptor broken"),
         ):
             with pytest.raises((AttributeError, RuntimeError)):
@@ -525,7 +525,7 @@ class TestConstanceDescriptor:
         setattr(mock_config, descriptor.constance_key, "constance_value")
 
         override_key = MySettings.override_settings_name
-        with patch("apps.core.app_settings.types.config", mock_config):
+        with patch("apps.core.app_setting.types.config", mock_config):
             with override_settings(**{override_key: {"LIVE_FLAG": "override_value"}}):
                 instance = MySettings()
                 result = instance.LIVE_FLAG
@@ -579,7 +579,7 @@ class TestAppSettingsIntegration:
     def test_override_settings_redirects_deferred_import(self):
         """End-to-end: ``override_settings`` can redirect a ``DefferedImport`` to a different path."""
         with override_settings(
-            CONCRETESETTINGS_APP_SETTINGS={"IMPORT_SETTING": "apps.core.app_settings.base.BaseDescriptor"}
+            CONCRETESETTINGS_APP_SETTINGS={"IMPORT_SETTING": "apps.core.app_setting.base.BaseDescriptor"}
         ):
             result = self.settings.IMPORT_SETTING
         assert result is BaseDescriptor
@@ -636,6 +636,6 @@ class TestAppSettingsIntegration:
         mock_config = MagicMock()
         setattr(mock_config, descriptor.constance_key, "live_db_value")
 
-        with patch("apps.core.app_settings.types.config", mock_config):
+        with patch("apps.core.app_setting.types.config", mock_config):
             instance = IntegrationSettings()
             assert instance.SOME_CONSTANCE_FLAG == "live_db_value"
