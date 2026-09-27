@@ -44,3 +44,36 @@ class ObjectNotFound(Exception):
             return f"{model_name} with {lookup_str} not found"
 
         return f"{model_name} not found"
+
+
+class CycleError(ValueError):
+    """
+    Raised when a circular dependency or cycle is detected in a graph.
+    """
+
+    pass
+
+
+class SeederException(Exception):
+    """General Exception raised when from seeder."""
+
+    pass
+
+
+class ObjectCreatorException(Exception):
+    """General Exception raised when creating an object."""
+
+    pass
+
+
+class InvalidTypeError(ValueError):
+
+    def __init__(self, type, expected):
+        message = f"Invalid data of type: {type}, expected: {expected}"
+        super().__init__(message)
+
+
+class RegistryException(Exception):
+    """Raise when re-registring something to registry."""
+
+    pass

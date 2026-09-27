@@ -1,11 +1,19 @@
 from django.urls import include, path
 
 from apps.core.admin import tenant_admin_site
-from apps.core.api_router import get_api_router_instance
+from apps.tenants.urls import tenants_router
 
-api_router = get_api_router_instance()
+# from apps.crm.urls import crm_router
 
-
-# api_router.register()
-
-urlpatterns = [path("admin/", tenant_admin_site.urls, name="admin"), path("api/", include(api_router.urls))]
+urlpatterns = [
+    path("admin/", tenant_admin_site.urls, name="admin"),
+    path(
+        "api/",
+        include(
+            [
+                *tenants_router.urls,
+                # *crm_router.urls
+            ]
+        ),
+    ),
+]

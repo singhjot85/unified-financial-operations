@@ -205,7 +205,7 @@ LOCAL_ENVS = ["local", "dev", "devlopment"]
 
 if CURRENT_ENV in LOCAL_ENVS:
     DEBUG = True
-    ALLOWED_HOSTS = []
+    ALLOWED_HOSTS = ["django", "*", "localhost", "0.0.0.0"]
     WSGI_APPLICATION = "config.wsgi.application"
 else:
     # TODO: Write WSGI and  ALLOWED_HOSTS configuration for production

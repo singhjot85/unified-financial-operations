@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import type { Campaign, Donation, DonationOption, Frequency } from '../types';
+import type { Campaign, Donation, DonationOption } from '../types';
 import { donationService } from '../services/donationService';
 import { DEFAULT_CONFIG } from '../conf/defaults';
 
